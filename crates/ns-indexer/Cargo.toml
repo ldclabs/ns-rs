@@ -3,10 +3,10 @@ name = "ns-indexer"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.64"
-description = ""
+description = "Name & Service Protocol indexer service in Rust"
 publish = false
 repository = "https://github.com/ldclabs/ns-rs/crates/ns-indexer"
-license = "CC0 1.0 Universal"
+license = "CC0-1.0"
 
 [lib]
 

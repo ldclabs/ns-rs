@@ -3,9 +3,10 @@ name = "ns-rs"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.64"
-description = ""
+description = "Name & Service Protocol implementations in Rust"
 publish = false
 repository = "https://github.com/ldclabs/ns-rs"
+license = "CC0-1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
