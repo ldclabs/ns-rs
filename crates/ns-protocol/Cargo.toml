@@ -1,0 +1,25 @@
+[package]
+name = "ns-protocol"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = true
+repository = "https://github.com/ldclabs/ns-rs/crates/ns-protocol"
+license = "CC0 1.0 Universal"
+
+[lib]
+
+[dependencies]
+anyhow = { workspace = true }
+bytes = { workspace = true }
+base64 = { workspace = true }
+ciborium = { workspace = true }
+ciborium-io = { workspace = true }
+ed25519-dalek = { workspace = true }
+serde = { workspace = true }
+finl_unicode = "1.2.0"
+
+[dev-dependencies]
+faster-hex = "0.8"
+hex-literal = "0.4"

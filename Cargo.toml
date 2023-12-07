@@ -1,0 +1,63 @@
+[package]
+name = "ns-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = false
+repository = "https://github.com/ldclabs/ns-rs"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[workspace]
+members = ["crates/*"]
+
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.6", features = [
+  "headers",
+  "http1",
+  "http2",
+  "json",
+  "macros",
+  "matched-path",
+  "tokio",
+  "query",
+], default-features = true }
+bytes = "1"
+base64 = "0.21"
+ciborium = "0.2"
+ciborium-io = "0.2"
+ed25519-dalek = "2"
+libflate = "1"
+log = "0.4"
+mime = "0.3"
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
+structured-logger = "1"
+tokio = { version = "1", features = [
+  "fs",
+  "io-util",
+  "io-std",
+  "macros",
+  "net",
+  "parking_lot",
+  "process",
+  "rt",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+], default-features = true }
+
+[dev-dependencies]
+faster-hex = "0.8"
+hex-literal = "0.4"
+
+[[bin]]
+name = "ns-indexer"
+path = "crates/ns-indexer/bin/main.rs"
+
+[profile.release]
+lto = true
