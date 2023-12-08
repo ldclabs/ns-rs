@@ -17,22 +17,24 @@ pub struct Name {
     pub name: String,
     pub sequence: u64,
     pub payload: Service,
-    pub signatures: Signatures,
+    pub signatures: Vec<Signature>,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Service {
     pub code: u32,
-    pub opcode: u8,
-    pub params: Value,
+    pub operations: Vec<Operation>,
     pub approver: Option<String>, // approver's name
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Signature(Vec<u8>);
+#[derive(Clone, PartialEq, Debug)]
+pub struct Operation {
+    pub code: u32,
+    pub params: Value,
+}
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Signatures(Vec<Signature>);
+pub struct Signature(pub Vec<u8>);
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct PublicKeyParams {
@@ -80,7 +82,7 @@ impl PublicKeyParams {
 
     pub fn verifying_threshold(&self, level: ThresholdLevel) -> u8 {
         match level {
-            ThresholdLevel::One => 1,
+            ThresholdLevel::Single => 1,
             ThresholdLevel::Default => self.threshold.unwrap_or(self.public_keys.len() as u8),
             ThresholdLevel::Strict => {
                 let full = self.public_keys.len() as u8;
@@ -91,16 +93,16 @@ impl PublicKeyParams {
                     l
                 }
             }
-            ThresholdLevel::Full => self.public_keys.len() as u8,
+            ThresholdLevel::All => self.public_keys.len() as u8,
         }
     }
 }
 
 pub enum ThresholdLevel {
-    One,
+    Single,
     Default, // DefaultLevel = threshold, 1 <= DefaultLevel <= public_keys.len()
     Strict,  // StrictLevel = threshold + 1, 1 <= StrictLevel <= public_keys.len()
-    Full,    // FullLevel = public_keys.len()
+    All,     // AllLevel = public_keys.len()
 }
 
 // https://docs.rs/finl_unicode/latest/finl_unicode/categories/trait.CharacterCategories.html
@@ -173,18 +175,18 @@ impl Name {
                 return Err(format!("invalid approver {}", approver).into());
             }
         }
-        if self.signatures.0.is_empty() {
+        if self.signatures.is_empty() {
             return Err("missing signatures".into());
         }
-        for sig in self.signatures.0.iter() {
+        for sig in self.signatures.iter() {
             if sig.0.len() != 64 {
                 return Err(format!("expected signature length 64, got {:?}", sig.0.len()).into());
             }
         }
 
-        let mut signatures = self.signatures.0.clone();
+        let mut signatures = self.signatures.clone();
         signatures.dedup();
-        if signatures.len() != self.signatures.0.len() {
+        if signatures.len() != self.signatures.len() {
             return Err(format!("duplicate signatures {:?}", self.signatures).into());
         }
         Ok(())
@@ -204,7 +206,7 @@ impl Name {
         let data = self.to_sign_bytes()?;
         let mut keys = params.public_keys.iter();
         let mut count = 0;
-        for sig in self.signatures.0.iter() {
+        for sig in self.signatures.iter() {
             let sig = Ed25519Signature::from_slice(&sig.0)?;
             for key in keys.by_ref() {
                 let verifying_key = Ed25519VerifyingKey::try_from(key.as_slice())?;
@@ -243,7 +245,7 @@ impl Name {
             .map(|key| Ed25519SigningKey::try_from(key.as_slice()))
             .collect::<Result<Vec<Ed25519SigningKey>, ed25519_dalek::ed25519::Error>>()?;
 
-        let mut signatures: Vec<Signature> = Vec::with_capacity(threshold as usize);
+        self.signatures = Vec::with_capacity(threshold as usize);
         // siging in order of public keys
         for pk in params.public_keys.iter() {
             if let Some(signer) = signing_keys
@@ -251,17 +253,16 @@ impl Name {
                 .find(|sk| sk.verifying_key().as_bytes().as_slice() == pk)
             {
                 let sig = Signature(signer.sign(&data).to_bytes().to_vec());
-                signatures.push(sig);
+                self.signatures.push(sig);
             }
         }
-        self.signatures = Signatures(signatures);
         Ok(())
     }
 
     pub fn sign_with(&mut self, signer: &Ed25519SigningKey) -> Result<(), Box<dyn Error>> {
         let data = self.to_sign_bytes()?;
         let sig = Signature(signer.sign(&data).to_bytes().to_vec());
-        self.signatures.0.push(sig);
+        self.signatures.push(sig);
         Ok(())
     }
 }
@@ -269,31 +270,6 @@ impl Name {
 impl From<&Signature> for Value {
     fn from(signature: &Signature) -> Self {
         Value::Bytes(signature.0.clone())
-    }
-}
-
-impl From<&Signatures> for Value {
-    fn from(signatures: &Signatures) -> Self {
-        Value::Array(signatures.0.iter().map(Value::from).collect())
-    }
-}
-
-impl From<&Service> for Value {
-    fn from(service: &Service) -> Self {
-        if let Some(ref approver) = service.approver {
-            Value::Array(vec![
-                Value::Integer(service.code.into()),
-                Value::Integer(service.opcode.into()),
-                service.params.clone(),
-                Value::Text(approver.clone()),
-            ])
-        } else {
-            Value::Array(vec![
-                Value::Integer(service.code.into()),
-                Value::Integer(service.opcode.into()),
-                service.params.clone(),
-            ])
-        }
     }
 }
 
@@ -319,13 +295,32 @@ impl From<&PublicKeyParams> for Value {
     }
 }
 
+impl From<&Operation> for Value {
+    fn from(op: &Operation) -> Self {
+        Value::Array(vec![op.code.into(), op.params.clone()])
+    }
+}
+
+impl From<&Service> for Value {
+    fn from(service: &Service) -> Self {
+        let mut arr = vec![
+            service.code.into(),
+            Value::Array(service.operations.iter().map(Value::from).collect()),
+        ];
+        if let Some(ref approver) = service.approver {
+            arr.push(Value::Text(approver.clone()));
+        }
+        Value::Array(arr)
+    }
+}
+
 impl From<&Name> for Value {
     fn from(name: &Name) -> Self {
         Value::Array(vec![
             Value::from(name.name.clone()),
             Value::from(name.sequence),
             Value::from(&name.payload),
-            Value::from(&name.signatures),
+            Value::Array(name.signatures.iter().map(Value::from).collect()),
         ])
     }
 }
@@ -349,16 +344,23 @@ impl TryFrom<&Value> for Signature {
     }
 }
 
-impl TryFrom<&Value> for Signatures {
+impl TryFrom<&Value> for Operation {
     type Error = Box<dyn Error>;
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         match value {
             Value::Array(arr) => {
-                let sigs: Vec<Signature> =
-                    arr.iter()
-                        .map(Signature::try_from)
-                        .collect::<Result<Vec<Signature>, Self::Error>>()?;
-                Ok(Signatures(sigs))
+                if arr.len() != 2 {
+                    return Err(format!("expected array of length 2, got {:?}", arr.len()).into());
+                }
+
+                Ok(Operation {
+                    code: arr[0]
+                        .as_integer()
+                        .ok_or_else(|| format!("expected integer, got {}", kind_of_value(&arr[0])))?
+                        .try_into()
+                        .map_err(|err| format!("expected u32, error: {:?}", err))?,
+                    params: arr[1].clone(),
+                })
             }
             _ => Err(format!("expected array, got {}", kind_of_value(value)).into()),
         }
@@ -372,30 +374,30 @@ impl TryFrom<&Value> for Service {
             .as_array()
             .ok_or_else(|| format!("expected array, got {}", kind_of_value(value)))?;
         match arr.len() {
-            v if v == 3 || v == 4 => {
+            v if v == 2 || v == 3 => {
                 let mut srv = Service {
                     code: arr[0]
                         .as_integer()
                         .ok_or_else(|| format!("expected integer, got {}", kind_of_value(&arr[0])))?
                         .try_into()
                         .map_err(|err| format!("expected u32, error: {:?}", err))?,
-                    opcode: arr[1]
-                        .as_integer()
-                        .ok_or_else(|| format!("expected integer, got {}", kind_of_value(&arr[1])))?
-                        .try_into()
-                        .map_err(|err| format!("expected u8, error: {:?}", err))?,
-                    params: arr[2].clone(),
+                    operations: arr[1]
+                        .as_array()
+                        .ok_or_else(|| format!("expected array, got {}", kind_of_value(&arr[1])))?
+                        .iter()
+                        .map(Operation::try_from)
+                        .collect::<Result<Vec<Operation>, Self::Error>>()?,
                     approver: None,
                 };
-                if v == 4 {
-                    let approver = arr[3]
+                if v == 3 {
+                    let approver = arr[2]
                         .as_text()
-                        .ok_or_else(|| format!("expected text, got {}", kind_of_value(&arr[3])))?;
+                        .ok_or_else(|| format!("expected text, got {}", kind_of_value(&arr[2])))?;
                     srv.approver = Some(approver.to_string());
                 }
                 Ok(srv)
             }
-            v => Err(format!("expected array of length 3 or 4, got {:?}", v).into()),
+            v => Err(format!("expected array of length 2 or 3, got {:?}", v).into()),
         }
     }
 }
@@ -414,7 +416,8 @@ impl TryFrom<&Value> for PublicKeyParams {
                         .ok_or_else(|| format!("expected array, got {}", kind_of_value(&arr[0])))?
                         .iter()
                         .map(|pk| {
-                            pk.as_bytes().map(|v| v.to_owned())
+                            pk.as_bytes()
+                                .map(|v| v.to_owned())
                                 .ok_or_else(|| format!("expected bytes, got {}", kind_of_value(pk)))
                         })
                         .collect::<Result<Vec<Vec<u8>>, String>>()?,
@@ -463,7 +466,12 @@ impl TryFrom<&Value> for Name {
                     .try_into()
                     .map_err(|err| format!("expected u64, error: {:?}", err))?,
                 payload: Service::try_from(&arr[2])?,
-                signatures: Signatures::try_from(&arr[3])?,
+                signatures: arr[3]
+                    .as_array()
+                    .ok_or_else(|| format!("expected array, got {}", kind_of_value(&arr[3])))?
+                    .iter()
+                    .map(Signature::try_from)
+                    .collect::<Result<Vec<Signature>, Self::Error>>()?,
             }),
             _ => Err(format!("expected array of length 4, got {:?}", arr.len()).into()),
         }
@@ -479,52 +487,13 @@ impl Serialize for Signature {
     }
 }
 
-struct SignatureVisitor;
-
-impl<'de> de::Visitor<'de> for SignatureVisitor {
-    type Value = Signature;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a 64 bytes signature")
-    }
-
-    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        if v.len() != 64 {
-            Err(de::Error::custom(format!(
-                "expected value length 64, got {:?}",
-                v.len()
-            )))
-        } else {
-            let mut value = Vec::with_capacity(64);
-            value.extend_from_slice(v);
-            Ok(Signature(value))
-        }
-    }
-
-    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_borrowed_bytes(v)
-    }
-
-    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        self.visit_borrowed_bytes(&v)
-    }
-}
-
 impl<'de> Deserialize<'de> for Signature {
     fn deserialize<D>(deserializer: D) -> Result<Signature, D::Error>
     where
         D: de::Deserializer<'de>,
     {
-        deserializer.deserialize_any(SignatureVisitor)
+        let val = Value::deserialize(deserializer)?;
+        Signature::try_from(&val).map_err(de::Error::custom)
     }
 }
 
@@ -542,8 +511,8 @@ impl<'de> Deserialize<'de> for Service {
     where
         D: de::Deserializer<'de>,
     {
-        let arr = Value::deserialize(deserializer)?;
-        Service::try_from(&arr).map_err(de::Error::custom)
+        let val = Value::deserialize(deserializer)?;
+        Service::try_from(&val).map_err(de::Error::custom)
     }
 }
 
@@ -561,8 +530,8 @@ impl<'de> Deserialize<'de> for Name {
     where
         D: de::Deserializer<'de>,
     {
-        let arr = Value::deserialize(deserializer)?;
-        Name::try_from(&arr).map_err(de::Error::custom)
+        let val = Value::deserialize(deserializer)?;
+        Name::try_from(&val).map_err(de::Error::custom)
     }
 }
 
@@ -642,27 +611,29 @@ mod tests {
             sequence: 0,
             payload: Service {
                 code: 0,
-                opcode: 1,
-                params: Value::from(&params),
+                operations: vec![Operation {
+                    code: 1,
+                    params: Value::from(&params),
+                }],
                 approver: None,
             },
-            signatures: Signatures(vec![]),
+            signatures: vec![],
         };
         assert!(name.validate().is_err());
         name.sign(&params, ThresholdLevel::Default, &[secret_key.to_vec()])
             .unwrap();
         assert!(name.validate().is_ok());
-        assert!(name.verify(&params, ThresholdLevel::One).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Single).is_ok());
         assert!(name.verify(&params, ThresholdLevel::Default).is_ok());
         assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
-        assert!(name.verify(&params, ThresholdLevel::Full).is_ok());
-        assert_eq!(name.signatures.0, vec![Signature(
-            hex!("d4eee79600a9414099f172d7416b64d8901154e479fd26f54f30b47bf9ddd014aaf1396f5f3ab8134ec0bed1763803701a485e8e3b1e2e47968b3e1b846c7b00").to_vec(),
+        assert!(name.verify(&params, ThresholdLevel::All).is_ok());
+        assert_eq!(name.signatures, vec![Signature(
+            hex!("e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c").to_vec(),
         )]);
 
         let data = name.to_bytes().unwrap();
-        assert_eq!(hex_string(&data), "d8358461610083000182815820ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee60189026601815840d4eee79600a9414099f172d7416b64d8901154e479fd26f54f30b47bf9ddd014aaf1396f5f3ab8134ec0bed1763803701a485e8e3b1e2e47968b3e1b846c7b00");
-        // 53(["a", 0, [0, 1, [[h'ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266'], 1]], [h'd4eee79600a9414099f172d7416b64d8901154e479fd26f54f30b47bf9ddd014aaf1396f5f3ab8134ec0bed1763803701a485e8e3b1e2e47968b3e1b846c7b00']])
+        assert_eq!(hex_string(&data), "d83584616100820081820182815820ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee60189026601815840e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c");
+        // 53(["a", 0, [0, [[1, [[h'ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266'], 1]]]], [h'e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c']])
 
         let name2 = Name::decode_from(&data[..]).unwrap();
         assert_eq!(name, name2);
