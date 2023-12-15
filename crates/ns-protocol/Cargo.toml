@@ -1,6 +1,6 @@
 [package]
 name = "ns-protocol"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.64"
 description = "Name & Service Protocol in Rust"
@@ -19,6 +19,7 @@ ciborium-io = { workspace = true }
 ed25519-dalek = { workspace = true }
 serde = { workspace = true }
 finl_unicode = "1.2.0"
+sha3 = "0.10"
 
 [dev-dependencies]
 faster-hex = "0.8"

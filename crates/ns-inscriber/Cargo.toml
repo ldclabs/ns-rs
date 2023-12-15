@@ -1,26 +1,23 @@
 [package]
-name = "ns-indexer"
+name = "ns-inscriber"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.64"
-description = "Name & Service Protocol indexer service in Rust"
+description = "Name & Service Protocol inscriber service in Rust"
 publish = false
-repository = "https://github.com/ldclabs/ns-rs/crates/ns-indexer"
+repository = "https://github.com/ldclabs/ns-rs/crates/ns-inscriber"
 license = "CC0-1.0"
 
 [lib]
 
 [[bin]]
-name = "ns-indexer"
+name = "ns-inscriber"
 path = "src/bin/main.rs"
 
 [dependencies]
 ns-protocol = { path = "../ns-protocol" }
-axum-web = { path = "../internal/axum-web" }
-scylla-orm = { path = "../internal/scylla-orm" }
-scylla-orm-macros = { path = "../internal/scylla-orm-macros" }
+ns-indexer = { path = "../ns-indexer" }
 anyhow = { workspace = true }
-axum = { workspace = true }
 bytes = { workspace = true }
 base64 = { workspace = true }
 ciborium = { workspace = true }
@@ -40,18 +37,7 @@ reqwest = { version = "0.11", features = [
 ], default-features = false }
 bitcoin = { version = "0.31", features = ["serde", "base64", "rand"] }
 dotenvy = "0.15"
-faster-hex = "0.8"
 bitcoincore-rpc-json = "0.18.0"
-scylla = "0.10"
-tower = "0.4"
-tower-http = { version = "0.5", features = [
-  "catch-panic",
-  "compression-gzip",
-  "compression-zstd",
-  "decompression-gzip",
-  "decompression-zstd",
-  "propagate-header",
-] }
 
 [dev-dependencies]
 hex-literal = "0.4"

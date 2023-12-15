@@ -1,0 +1,19 @@
+[package]
+name = "scylla-orm"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = false
+repository = "https://github.com/ldclabs/ns-rs/crates/internal/scylla-orm"
+license = "CC0-1.0"
+
+[lib]
+
+[dependencies]
+anyhow = { workspace = true }
+scylla = "0.10"
+
+[dev-dependencies]
+ciborium = { workspace = true }
+serde = { workspace = true }

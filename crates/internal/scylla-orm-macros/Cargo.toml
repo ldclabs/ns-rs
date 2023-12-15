@@ -1,0 +1,19 @@
+[package]
+name = "scylla-orm-macros"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = false
+repository = "https://github.com/ldclabs/ns-rs/crates/internal/scylla-orm-macros"
+license = "CC0-1.0"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.*"
+syn = "2.0.*"
+proc-macro2 = "1.0.*"
+
+[dev-dependencies]

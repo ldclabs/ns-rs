@@ -1,0 +1,28 @@
+[package]
+name = "axum-web"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = ""
+publish = false
+repository = "https://github.com/ldclabs/ns-rs/crates/internal/axum-web"
+license = "CC0-1.0"
+
+[lib]
+
+[dependencies]
+anyhow = { workspace = true }
+axum = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+base64 = { workspace = true }
+ciborium = { workspace = true }
+ciborium-io = { workspace = true }
+libflate = { workspace = true }
+log = { workspace = true }
+mime = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+structured-logger = { workspace = true }
+tokio = { workspace = true }
+zstd = "0.12"
