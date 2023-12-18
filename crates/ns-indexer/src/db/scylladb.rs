@@ -176,7 +176,7 @@ mod tests {
                     .collect(),
                 username: std::env::var("SCYLLA_USERNAME").unwrap_or_default(),
                 password: std::env::var("SCYLLA_PASSWORD").unwrap_or_default(),
-                keyspace: std::env::var("SCYLLA_KEYSPACE").unwrap_or_default(),
+                keyspace: "".to_string(),
             };
             let res = db::scylladb::ScyllaDB::new(&cfg).await;
             res.unwrap()
@@ -187,7 +187,6 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn exec_cqls_works() {
         dotenvy::from_filename(".env.sample").expect(".env file not found");
-
         let db = get_db().await;
 
         let schema = std::include_str!("../../cql/schema.cql");

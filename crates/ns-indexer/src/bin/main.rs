@@ -4,10 +4,10 @@ use std::sync::Arc;
 use structured_logger::{async_json::new_writer, get_env_level, Builder};
 use tokio::signal;
 
+use ns_indexer::api::IndexerAPI;
 use ns_indexer::bitcoin::{BitcoinRPC, BitcoinRPCOptions};
 use ns_indexer::db::scylladb::ScyllaDBOptions;
 use ns_indexer::indexer::{Indexer, IndexerOptions};
-use ns_indexer::indexer_api::{self, IndexerAPI};
 use ns_indexer::router;
 use ns_indexer::scanner::Scanner;
 
@@ -76,8 +76,8 @@ fn main() -> anyhow::Result<()> {
             let addr = std::env::var("INDEXER_SERVER_ADDR").unwrap_or("127.0.0.1:3000".to_string());
             log::info!(
                 "{}@{} start at {}",
-                indexer_api::APP_NAME,
-                indexer_api::APP_VERSION,
+                ns_indexer::APP_NAME,
+                ns_indexer::APP_VERSION,
                 &addr
             );
             let listener = tokio::net::TcpListener::bind(&addr)
@@ -102,7 +102,11 @@ fn main() -> anyhow::Result<()> {
         let background_job = async {
             match scanner.run(shutdown.clone(), start_height).await {
                 Ok(_) => log::info!(target: "server", "scanner finished"),
-                Err(err) => log::error!(target: "server", "scanner error: {}", err),
+                Err(err) => {
+                    log::error!(target: "server", "scanner error: {}", err);
+                    // should exit the process and restart
+                    return Err(err);
+                }
             }
 
             Ok::<(), anyhow::Error>(())

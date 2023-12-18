@@ -214,6 +214,22 @@ impl Name {
             return Err(Error::Custom(format!("invalid name {}", self.name)));
         }
 
+        if self.sequence > i64::MAX as u64 {
+            return Err(Error::Custom(format!(
+                "invalid sequence {}, expected less than {}",
+                self.sequence,
+                i64::MAX
+            )));
+        }
+
+        if self.payload.code > i64::MAX as u64 {
+            return Err(Error::Custom(format!(
+                "invalid payload code {}, expected less than {}",
+                self.payload.code,
+                i64::MAX
+            )));
+        }
+
         if let Some(approver) = &self.payload.approver {
             if !valid_name(approver) {
                 return Err(Error::Custom(format!("invalid approver {}", approver)));

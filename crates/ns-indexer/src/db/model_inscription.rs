@@ -389,6 +389,90 @@ impl Inscription {
         let _ = db.batch(statements, values).await?;
         Ok(())
     }
+
+    pub async fn get_by_height(
+        db: &scylladb::ScyllaDB,
+        height: i64,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Self> {
+        let fields = Self::select_fields(select_fields, true)?;
+
+        let query = format!(
+            "SELECT {} FROM inscription WHERE height=? LIMIT 1",
+            fields.clone().join(",")
+        );
+        let params = (height,);
+        let res = db.execute(query, params).await?.single_row()?;
+
+        let mut cols = ColumnsMap::with_capacity(fields.len());
+        cols.fill(res, &fields)?;
+        let mut doc = Self::default();
+        doc.fill(&cols);
+        doc._fields = fields.clone();
+
+        Ok(doc)
+    }
+
+    pub async fn list_by_block_height(
+        db: &scylladb::ScyllaDB,
+        height: i64,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Self>> {
+        let fields = Self::select_fields(select_fields, true)?;
+
+        let query = format!(
+            "SELECT {} FROM inscription WHERE block_height=?",
+            fields.clone().join(",")
+        );
+        let params = (height,);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Self::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
+
+    pub async fn list_by_name(
+        db: &scylladb::ScyllaDB,
+        name: &String,
+        select_fields: Vec<String>,
+        page_size: u16,
+        page_token: Option<i64>,
+    ) -> anyhow::Result<Vec<Self>> {
+        let fields = Self::select_fields(select_fields, true)?;
+
+        let token = match page_token {
+            Some(i) => i,
+            None => i64::MAX,
+        };
+
+        let query = format!(
+            "SELECT {} FROM inscription WHERE name=? AND sequence<? LIMIT ? USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (name.to_cql(), token.to_cql(), page_size as i32);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Self::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
 }
 
 impl InvalidInscription {
@@ -438,5 +522,28 @@ impl InvalidInscription {
 
         let _ = db.execute(query, params).await?;
         Ok(true)
+    }
+
+    pub async fn list_by_name(db: &scylladb::ScyllaDB, name: &String) -> anyhow::Result<Vec<Self>> {
+        let fields = Self::fields();
+
+        let query = format!(
+            "SELECT {} FROM invalid_inscription WHERE name=? USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (name.to_cql(),);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Self::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
     }
 }

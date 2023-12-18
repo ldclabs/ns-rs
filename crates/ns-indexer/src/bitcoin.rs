@@ -117,23 +117,32 @@ impl BitcoinRPC {
         };
         let input = to_vec(&input)?;
 
-        let mut res = self
-            .client
-            .post(self.url.clone())
-            .body(input.clone())
-            .send()
-            .await?;
-
-        // retry once if server error
-        if res.status().as_u16() > 500 {
-            sleep(Duration::from_secs(1)).await;
-            res = self
+        // retry if server error
+        let mut retry_secs = 0;
+        let res = loop {
+            match self
                 .client
                 .post(self.url.clone())
-                .body(input)
+                .body(input.clone())
                 .send()
-                .await?;
-        }
+                .await
+            {
+                Ok(res) => break res,
+                Err(err) => {
+                    retry_secs += 1;
+                    if retry_secs <= 5 {
+                        log::warn!(target: "ns-indexer",
+                            action = "bitcoin_rpc_retry";
+                            "{}", err.to_string(),
+                        );
+                        sleep(Duration::from_secs(retry_secs)).await;
+                        continue;
+                    } else {
+                        anyhow::bail!("BitcoinRPC: {}", err.to_string());
+                    }
+                }
+            }
+        };
 
         let data = res.bytes().await?;
         let output: RPCResponse<T> = serde_json::from_slice(&data).map_err(|err| {

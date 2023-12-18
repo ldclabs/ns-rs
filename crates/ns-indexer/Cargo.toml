@@ -40,7 +40,7 @@ reqwest = { version = "0.11", features = [
 ], default-features = false }
 bitcoin = { version = "0.31", features = ["serde", "base64", "rand"] }
 dotenvy = "0.15"
-faster-hex = "0.8"
+faster-hex = "0.9"
 bitcoincore-rpc-json = "0.18.0"
 scylla = "0.10"
 tower = "0.4"
@@ -52,6 +52,7 @@ tower-http = { version = "0.5", features = [
   "decompression-zstd",
   "propagate-header",
 ] }
+validator = { version = "0.16", features = ["derive"] }
 
 [dev-dependencies]
 hex-literal = "0.4"

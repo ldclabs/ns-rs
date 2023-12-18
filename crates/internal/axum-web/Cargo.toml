@@ -25,4 +25,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 structured-logger = { workspace = true }
 tokio = { workspace = true }
+scylla = "0.10"
 zstd = "0.12"
+validator = { version = "0.16", features = ["derive"] }

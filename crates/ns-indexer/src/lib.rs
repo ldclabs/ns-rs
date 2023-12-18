@@ -1,7 +1,10 @@
+pub mod api;
 pub mod bitcoin;
 pub mod db;
 pub mod envelope;
 pub mod indexer;
-pub mod indexer_api;
 pub mod router;
 pub mod scanner;
+
+pub const APP_NAME: &str = env!("CARGO_PKG_NAME");
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");

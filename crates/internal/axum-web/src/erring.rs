@@ -3,10 +3,10 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use scylla::transport::query_result::SingleRowError;
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fmt::Debug};
-
-use crate::object::PackObject;
+use validator::{ValidationError, ValidationErrors};
 
 /// ErrorResponse is the response body for error.
 #[derive(Deserialize, Serialize)]
@@ -20,7 +20,7 @@ pub struct SuccessResponse<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub total_size: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_page_token: Option<PackObject<Vec<u8>>>,
+    pub next_page_token: Option<String>,
     pub result: T,
 }
 
@@ -74,5 +74,32 @@ impl IntoResponse for HTTPError {
 
         let body = Json(ErrorResponse { error: self });
         (status, body).into_response()
+    }
+}
+
+impl From<anyhow::Error> for HTTPError {
+    fn from(err: anyhow::Error) -> Self {
+        match err.downcast::<Self>() {
+            Ok(err) => err,
+            Err(sel) => match sel.downcast::<ValidationErrors>() {
+                Ok(sel) => HTTPError::new(400, format!("{:?}", sel)),
+                Err(sel) => match sel.downcast::<SingleRowError>() {
+                    Ok(_) => HTTPError::new(404, "data not found".to_string()),
+                    Err(sel) => HTTPError::new(500, format!("{:?}", sel)),
+                },
+            },
+        }
+    }
+}
+
+impl From<ValidationError> for HTTPError {
+    fn from(err: ValidationError) -> Self {
+        HTTPError::new(400, format!("{:?}", err))
+    }
+}
+
+impl From<ValidationErrors> for HTTPError {
+    fn from(err: ValidationErrors) -> Self {
+        HTTPError::new(400, format!("{:?}", err))
     }
 }

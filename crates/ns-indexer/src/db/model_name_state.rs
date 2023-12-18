@@ -235,4 +235,52 @@ impl NameState {
         let _ = db.batch(statements, values).await?;
         Ok(())
     }
+
+    pub async fn list_by_query(db: &scylladb::ScyllaDB, q: String) -> anyhow::Result<Vec<String>> {
+        let fields = NameIndex::fields();
+
+        let query = format!(
+            "SELECT {} FROM name_index WHERE name LIKE ? LIMIT 100 ALLOW FILTERING",
+            fields.clone().join(",")
+        );
+        let params = (q + "%",);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<NameIndex> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = NameIndex::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            res.push(doc);
+        }
+
+        res.sort_by(|a, b| b.block_time.partial_cmp(&a.block_time).unwrap());
+        Ok(res.into_iter().map(|name| name.name).collect())
+    }
+
+    pub async fn list_by_pubkey(
+        db: &scylladb::ScyllaDB,
+        pubkey: Vec<u8>,
+    ) -> anyhow::Result<Vec<String>> {
+        let fields = vec!["name".to_string()];
+        if pubkey.len() != 32 {
+            return Ok(vec![]);
+        }
+
+        let query = "SELECT name FROM pubkey_name WHERE pubkey=?";
+        let params = (pubkey,);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<PubkeyName> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = PubkeyName::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            res.push(doc);
+        }
+
+        Ok(res.into_iter().map(|name| name.name).collect())
+    }
 }

@@ -49,9 +49,10 @@ impl Scanner {
                 bestblock = self.bitcoin.wait_for_new_block(1).await?;
                 if height > bestblock.height {
                     log::info!(target: "ns-indexer",
-                        blockhash = bestblock.hash.to_string(),
-                        height = bestblock.height;
-                        "waiting for new block",
+                        action = "waiting_block",
+                        block_hash = bestblock.hash.to_string(),
+                        block_height = bestblock.height;
+                        "",
                     );
                     continue;
                 }
@@ -63,11 +64,6 @@ impl Scanner {
             };
 
             self.index_block(&blockhash).await?;
-            log::info!(target: "ns-indexer",
-                blockhash = blockhash.to_string(),
-                height = height;
-                "scanned block",
-            );
             height += 1;
         }
     }
@@ -78,6 +74,13 @@ impl Scanner {
         if block_height == 0 {
             return Ok(());
         }
+
+        log::info!(target: "ns-indexer",
+            action = "index_block",
+            block_hash = blockhash.to_string(),
+            block_height = block_height;
+            "",
+        );
 
         for tx in block.txdata {
             let envelopes = envelope::Envelope::from_transaction(&tx);

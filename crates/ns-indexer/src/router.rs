@@ -9,55 +9,71 @@ use tower_http::{
 use axum_web::context;
 use axum_web::encoding;
 
-use crate::indexer_api;
+use crate::api;
 
-pub fn new(state: Arc<indexer_api::IndexerAPI>) -> Router {
+pub fn new(state: Arc<api::IndexerAPI>) -> Router {
     let mds = ServiceBuilder::new()
         .layer(CatchPanicLayer::new())
         .layer(middleware::from_fn(context::middleware))
         .layer(CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)));
 
     Router::new()
-        .route("/", routing::get(indexer_api::version))
-        .route("/healthz", routing::get(indexer_api::version))
+        .route("/", routing::get(api::version))
+        .route("/healthz", routing::get(api::healthz))
         .nest(
             "/v1/name",
             Router::new()
-                .route("/", routing::get(indexer_api::version))
-                .route("/list", routing::get(indexer_api::version))
-                .route("/list_by_pubkey", routing::get(indexer_api::version)),
+                .route("/", routing::get(api::NameAPI::get))
+                .route("/list_by_query", routing::get(api::NameAPI::list_by_query))
+                .route(
+                    "/list_by_pubkey",
+                    routing::get(api::NameAPI::list_by_pubkey),
+                ),
         )
         .nest(
             "/v1/service",
             Router::new()
-                .route("/", routing::get(indexer_api::version))
-                .route("/list", routing::get(indexer_api::version)),
+                .route("/", routing::get(api::ServiceAPI::get))
+                .route("/list_by_name", routing::get(api::ServiceAPI::list_by_name)),
         )
         .nest(
             "/v1/inscription",
             Router::new()
-                .route("/", routing::get(indexer_api::version))
+                .route("/", routing::get(api::InscriptionAPI::get))
                 .route(
                     "/get_last_accepted",
-                    routing::get(indexer_api::get_last_accepted),
+                    routing::get(api::InscriptionAPI::get_last_accepted),
                 )
-                .route("/get_best", routing::get(indexer_api::version))
-                .route("/get_by_height", routing::get(indexer_api::version))
-                .route("/list_by_name", routing::get(indexer_api::version))
-                .route("/list_by_block_height", routing::get(indexer_api::version)),
+                .route("/get_best", routing::get(api::InscriptionAPI::get_best))
+                .route(
+                    "/get_by_height",
+                    routing::get(api::InscriptionAPI::get_by_height),
+                )
+                .route("/list_best", routing::get(api::InscriptionAPI::list_best))
+                .route(
+                    "/list_by_block_height",
+                    routing::get(api::InscriptionAPI::list_by_block_height),
+                )
+                .route(
+                    "/list_by_name",
+                    routing::get(api::InscriptionAPI::list_by_name),
+                ),
         )
         .nest(
             "/v1/invalid_inscription",
-            Router::new().route("/list_by_name", routing::get(indexer_api::version)),
+            Router::new().route(
+                "/list_by_name",
+                routing::get(api::InscriptionAPI::list_invalid_by_name),
+            ),
         )
-        .nest(
-            "/v1/service_protocol",
-            Router::new()
-                .route("/", routing::get(indexer_api::version))
-                .route("/list", routing::get(indexer_api::version))
-                .route("/list_by_code", routing::get(indexer_api::version))
-                .route("/list_by_submitter", routing::get(indexer_api::version)),
-        )
+        // .nest(
+        //     "/v1/service_protocol",
+        //     Router::new()
+        //         .route("/", routing::get(api::ServiceAPI::get))
+        //         .route("/list", routing::get(api::ServiceAPI::get))
+        //         .route("/list_by_code", routing::get(api::ServiceAPI::get))
+        //         .route("/list_by_submitter", routing::get(api::ServiceAPI::get)),
+        // )
         .route_layer(mds)
         .with_state(state)
 }

@@ -99,4 +99,31 @@ impl ServiceState {
 
         Ok(())
     }
+
+    pub async fn list_by_name(
+        db: &scylladb::ScyllaDB,
+        name: &String,
+        select_fields: Vec<String>,
+    ) -> anyhow::Result<Vec<Self>> {
+        let fields = Self::select_fields(select_fields, true)?;
+
+        let query = format!(
+            "SELECT {} FROM service_state WHERE name=? USING TIMEOUT 3s",
+            fields.clone().join(",")
+        );
+        let params = (name.to_cql(),);
+        let rows = db.execute_iter(query, params).await?;
+
+        let mut res: Vec<Self> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut doc = Self::default();
+            let mut cols = ColumnsMap::with_capacity(fields.len());
+            cols.fill(row, &fields)?;
+            doc.fill(&cols);
+            doc._fields = fields.clone();
+            res.push(doc);
+        }
+
+        Ok(res)
+    }
 }

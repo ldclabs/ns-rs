@@ -79,10 +79,6 @@ impl Indexer {
                 let mut last_accepted_state = self.state.last_accepted.write().await;
                 *last_accepted_state = Some(last_accepted.clone());
             }
-            {
-                let mut best_inscriptions_state = self.state.best_inscriptions.write().await;
-                best_inscriptions_state.push(last_accepted);
-            }
         }
         Ok(last_accepted_height.block_height as u64)
     }
@@ -96,7 +92,7 @@ impl Indexer {
     ) -> anyhow::Result<()> {
         let accepted_height = {
             let last_accepted_height_state = self.state.last_accepted_height.read().await;
-            if *last_accepted_height_state + ACCEPTED_DISTANCE <= block_height {
+            if *last_accepted_height_state + ACCEPTED_DISTANCE < block_height {
                 block_height - ACCEPTED_DISTANCE
             } else {
                 0
@@ -110,12 +106,13 @@ impl Indexer {
         for envelope in envelopes {
             for name in envelope.payload {
                 log::info!(target: "ns-indexer",
+                    action = "index_name",
                     block_height = block_height,
                     block_time = block_time,
                     txid = envelope.txid.to_string(),
                     name = name.name,
                     sequence = name.sequence;
-                    "indexing name",
+                    "",
                 );
                 match self.index_name(block_height, block_time, &name).await {
                     Err(err) => {
@@ -158,6 +155,7 @@ impl Indexer {
                         {
                             let mut best_inscriptions_state =
                                 self.state.best_inscriptions.write().await;
+
                             match best_inscriptions_state.last() {
                                 Some(prev_best_inscription) => {
                                     inscription.height = prev_best_inscription.height + 1;
@@ -165,10 +163,18 @@ impl Indexer {
                                         .hash()
                                         .expect("hash_sha3(inscription) should not fail");
                                 }
-                                None => {
-                                    // this is the first inscription
-                                    inscription.previous_hash = [0u8; 32].to_vec();
-                                }
+                                None => match *self.state.last_accepted.read().await {
+                                    Some(ref last_accepted_state) => {
+                                        inscription.height = last_accepted_state.height + 1;
+                                        inscription.previous_hash = last_accepted_state
+                                            .hash()
+                                            .expect("hash_sha3(inscription) should not fail");
+                                    }
+                                    None => {
+                                        // this is the first inscription
+                                        inscription.previous_hash = [0u8; 32].to_vec();
+                                    }
+                                },
                             }
 
                             best_inscriptions_state.push(inscription);
@@ -448,6 +454,16 @@ impl Indexer {
                 &inscriptions,
             )
             .await?;
+
+            log::info!(target: "ns-indexer",
+                action = "save_accepted",
+                block_height = accepted_height,
+                name_states = name_states.len(),
+                service_states = service_states.len(),
+                protocol_states = protocol_states.len(),
+                inscriptions = inscriptions.len();
+                "",
+            );
 
             {
                 let mut last_accepted_state = self.state.last_accepted.write().await;
