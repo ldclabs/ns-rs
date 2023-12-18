@@ -105,15 +105,6 @@ impl Indexer {
 
         for envelope in envelopes {
             for name in envelope.payload {
-                log::info!(target: "ns-indexer",
-                    action = "index_name",
-                    block_height = block_height,
-                    block_time = block_time,
-                    txid = envelope.txid.to_string(),
-                    name = name.name,
-                    sequence = name.sequence;
-                    "",
-                );
                 match self.index_name(block_height, block_time, &name).await {
                     Err(err) => {
                         if !name.name.is_empty() {

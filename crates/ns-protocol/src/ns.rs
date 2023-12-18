@@ -556,7 +556,7 @@ impl TryFrom<&Value> for PublicKeyParams {
                 Ok(params)
             }
             v => Err(Error::Custom(format!(
-                "expected array of length 4, got {:?}",
+                "expected array of length [1, 3], got {:?}",
                 v
             ))),
         }
@@ -618,6 +618,25 @@ impl<'de> Deserialize<'de> for Signature {
     {
         let val = Value::deserialize(deserializer)?;
         Signature::try_from(&val).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for PublicKeyParams {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Value::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PublicKeyParams {
+    fn deserialize<D>(deserializer: D) -> Result<PublicKeyParams, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        PublicKeyParams::try_from(&val).map_err(de::Error::custom)
     }
 }
 

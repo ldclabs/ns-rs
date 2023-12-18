@@ -22,20 +22,23 @@ impl InscriptionAPI {
         Extension(ctx): Extension<Arc<ReqContext>>,
         to: PackObject<()>,
         State(api): State<Arc<IndexerAPI>>,
-    ) -> Result<PackObject<SuccessResponse<Option<Inscription>>>, HTTPError> {
+    ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
         ctx.set("action", "get_last_accepted_inscription".into())
             .await;
 
         let last_accepted_state = api.state.last_accepted.read().await;
 
-        Ok(to.with(SuccessResponse::new(last_accepted_state.clone())))
+        match last_accepted_state.clone() {
+            Some(inscription) => Ok(to.with(SuccessResponse::new(inscription))),
+            None => Err(HTTPError::new(404, "not found".to_string())),
+        }
     }
 
     pub async fn get_best(
         Extension(ctx): Extension<Arc<ReqContext>>,
         to: PackObject<()>,
         State(api): State<Arc<IndexerAPI>>,
-    ) -> Result<PackObject<SuccessResponse<Option<Inscription>>>, HTTPError> {
+    ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
         ctx.set("action", "get_best_inscription".into()).await;
 
         let best_inscriptions_state = api.state.best_inscriptions.read().await;
@@ -45,7 +48,10 @@ impl InscriptionAPI {
             inscription = last_accepted_state.clone();
         }
 
-        Ok(to.with(SuccessResponse::new(inscription)))
+        match inscription {
+            Some(inscription) => Ok(to.with(SuccessResponse::new(inscription))),
+            None => Err(HTTPError::new(404, "not found".to_string())),
+        }
     }
 
     pub async fn get(

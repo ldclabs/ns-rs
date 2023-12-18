@@ -99,13 +99,16 @@ fn main() -> anyhow::Result<()> {
             Ok::<(), anyhow::Error>(())
         };
 
+        let scanning = std::env::var("INDEXER_SERVER_NOSCAN").unwrap_or_default() != "true";
         let background_job = async {
-            match scanner.run(shutdown.clone(), start_height).await {
-                Ok(_) => log::info!(target: "server", "scanner finished"),
-                Err(err) => {
-                    log::error!(target: "server", "scanner error: {}", err);
-                    // should exit the process and restart
-                    return Err(err);
+            if scanning {
+                match scanner.run(shutdown.clone(), start_height).await {
+                    Ok(_) => log::info!(target: "server", "scanner finished"),
+                    Err(err) => {
+                        log::error!(target: "server", "scanner error: {}", err);
+                        // should exit the process and restart
+                        return Err(err);
+                    }
                 }
             }
 

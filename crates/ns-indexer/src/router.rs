@@ -44,12 +44,10 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
                     "/get_last_accepted",
                     routing::get(api::InscriptionAPI::get_last_accepted),
                 )
-                .route("/get_best", routing::get(api::InscriptionAPI::get_best))
                 .route(
                     "/get_by_height",
                     routing::get(api::InscriptionAPI::get_by_height),
                 )
-                .route("/list_best", routing::get(api::InscriptionAPI::list_best))
                 .route(
                     "/list_by_block_height",
                     routing::get(api::InscriptionAPI::list_by_block_height),
@@ -58,6 +56,12 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
                     "/list_by_name",
                     routing::get(api::InscriptionAPI::list_by_name),
                 ),
+        )
+        .nest(
+            "/best/inscription",
+            Router::new()
+                .route("/", routing::get(api::InscriptionAPI::get_best))
+                .route("/list", routing::get(api::InscriptionAPI::list_best)),
         )
         .nest(
             "/v1/invalid_inscription",
