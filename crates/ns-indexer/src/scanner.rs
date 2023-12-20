@@ -4,7 +4,6 @@ use std::{future::Future, sync::Arc};
 use tokio::time::{sleep, Duration};
 
 use crate::bitcoin::BitcoinRPC;
-use crate::envelope;
 use crate::indexer::Indexer;
 
 pub struct Scanner {
@@ -83,9 +82,8 @@ impl Scanner {
         );
 
         for tx in block.txdata {
-            let envelopes = envelope::Envelope::from_transaction(&tx);
             self.indexer
-                .index(blockhash, block_height, block.header.time as u64, envelopes)
+                .index(blockhash, block_height, block.header.time as u64, tx)
                 .await?;
         }
         Ok(())

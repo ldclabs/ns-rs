@@ -386,6 +386,16 @@ impl Inscription {
         statements.push(checkpoint_query.as_str());
         values.push(checkpoint_params);
 
+        if statements.len() > 500 {
+            log::info!(target: "ns-indexer",
+                action = "save_checkpoint",
+                statements = statements.len(),
+                block_height = checkpoint.block_height,
+                height = checkpoint.height;
+                "",
+            );
+        }
+
         let _ = db.batch(statements, values).await?;
         Ok(())
     }

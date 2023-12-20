@@ -42,7 +42,7 @@ impl InscriptionAPI {
         ctx.set("action", "get_best_inscription".into()).await;
 
         let best_inscriptions_state = api.state.best_inscriptions.read().await;
-        let mut inscription = best_inscriptions_state.last().cloned();
+        let mut inscription = best_inscriptions_state.back().cloned();
         if inscription.is_none() {
             let last_accepted_state = api.state.last_accepted.read().await;
             inscription = last_accepted_state.clone();
@@ -107,7 +107,9 @@ impl InscriptionAPI {
     ) -> Result<PackObject<SuccessResponse<Vec<Inscription>>>, HTTPError> {
         ctx.set("action", "list_best_inscriptions".into()).await;
         let best_inscriptions_state = api.state.best_inscriptions.read().await;
-        Ok(to.with(SuccessResponse::new(best_inscriptions_state.clone())))
+        Ok(to.with(SuccessResponse::new(
+            best_inscriptions_state.iter().cloned().collect(),
+        )))
     }
 
     pub async fn list_by_block_height(

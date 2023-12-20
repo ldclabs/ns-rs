@@ -57,7 +57,16 @@ fn main() -> anyhow::Result<()> {
             rpcpassword,
         })
         .await?;
-        let indexer = Indexer::new(&IndexerOptions { scylla }).await?;
+
+        let indexer = Indexer::new(&IndexerOptions {
+            scylla,
+            index_utxo: std::env::var("INDEXER_UTXO")
+                .unwrap_or("false".to_string())
+                .parse::<bool>()
+                .unwrap(),
+        })
+        .await?;
+
         let last_accepted_height = indexer.initialize().await?;
         let start_height = if last_accepted_height > 0 {
             last_accepted_height + 1

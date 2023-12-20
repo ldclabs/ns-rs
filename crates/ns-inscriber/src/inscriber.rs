@@ -1,6 +1,7 @@
 use bitcoin::{
     address::NetworkChecked,
     blockdata::{opcodes, script::PushBytesBuf},
+    ecdsa,
     hashes::Hash,
     key::{
         constants::{SCHNORR_PUBLIC_KEY_SIZE, SCHNORR_SIGNATURE_SIZE},
@@ -8,15 +9,16 @@ use bitcoin::{
     },
     locktime::absolute::LockTime,
     secp256k1::{rand, All, Keypair, Message, Secp256k1, SecretKey},
-    sighash::{Prevouts, SighashCache, TapSighashType},
+    sighash::{EcdsaSighashType, Prevouts, SighashCache, TapSighashType},
     taproot::{
-        LeafVersion, Signature, TapLeafHash, TaprootBuilder, TAPROOT_CONTROL_BASE_SIZE,
+        self, LeafVersion, TapLeafHash, TaprootBuilder, TAPROOT_CONTROL_BASE_SIZE,
         TAPROOT_CONTROL_NODE_SIZE,
     },
     transaction::Version,
     Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
     Witness,
 };
+use std::collections::HashSet;
 
 use ns_protocol::ns::{Name, MAX_NAME_BYTES};
 
@@ -37,6 +39,7 @@ pub struct UnspentTxOut {
     pub txid: Txid,
     pub vout: u32,
     pub amount: Amount,
+    pub script_pubkey: ScriptBuf,
 }
 
 impl Inscriber {
@@ -56,28 +59,27 @@ impl Inscriber {
         fee_rate: Amount,
         secret: &SecretKey,
         unspent_txouts: &Vec<UnspentTxOut>,
-        inscription_key_pair: Option<Keypair>, // safe to use one-time KeyPair
+        inscription_keypair: Option<Keypair>, // safe to use one-time KeyPair
     ) -> anyhow::Result<Txid> {
         let keypair = Keypair::from_secret_key(&self.secp, secret);
-        let (internal_key, _parity) = keypair.x_only_public_key();
-        let script_pubkey = ScriptBuf::new_p2tr(&self.secp, internal_key, None);
-        let address: Address<NetworkChecked> = Address::from_script(&script_pubkey, self.network)?;
 
-        let (input, unsigned_commit_tx, signed_reveal_tx) = self
+        let (unspent_txout, unsigned_commit_tx, signed_reveal_tx) = self
             .build_inscription_transactions(
                 names,
                 fee_rate,
-                address,
                 unspent_txouts,
-                inscription_key_pair,
+                Some(inscription_keypair.unwrap_or(keypair)),
             )
             .await?;
 
         let mut signed_commit_tx = unsigned_commit_tx;
         // sigh commit_tx
-        {
-            let prevouts = vec![input];
+        if unspent_txout.script_pubkey.is_p2tr() {
             let mut sighasher = SighashCache::new(&mut signed_commit_tx);
+            let prevouts = vec![TxOut {
+                value: unspent_txout.amount,
+                script_pubkey: unspent_txout.script_pubkey.clone(),
+            }];
             let sighash = sighasher
                 .taproot_key_spend_signature_hash(
                     0,
@@ -92,22 +94,42 @@ impl Inscriber {
                 &tweaked.to_inner(),
             );
 
+            let signature = taproot::Signature {
+                sig,
+                hash_ty: TapSighashType::Default,
+            };
+
             sighasher
                 .witness_mut(0)
                 .expect("getting mutable witness reference should work")
-                .push(
-                    &Signature {
-                        sig,
-                        hash_ty: TapSighashType::Default,
-                    }
-                    .to_vec(),
-                );
+                .push(&signature.to_vec());
+        } else if unspent_txout.script_pubkey.is_p2wpkh() {
+            let mut sighasher = SighashCache::new(&mut signed_commit_tx);
+            let sighash = sighasher
+                .p2wpkh_signature_hash(
+                    0,
+                    &unspent_txout.script_pubkey,
+                    unspent_txout.amount,
+                    EcdsaSighashType::All,
+                )
+                .expect("failed to create sighash");
+
+            let sig = self
+                .secp
+                .sign_ecdsa(&Message::from(sighash), &keypair.secret_key());
+            let signature = ecdsa::Signature {
+                sig,
+                hash_ty: EcdsaSighashType::All,
+            };
+            signed_commit_tx.input[0].witness = Witness::p2wpkh(&signature, &keypair.public_key());
+        } else {
+            anyhow::bail!("unsupported script_pubkey");
         }
+
         let test_txs = self
             .bitcoin
             .test_mempool_accept(&[&signed_commit_tx, &signed_reveal_tx])
             .await?;
-
         for r in &test_txs {
             if !r.allowed {
                 anyhow::bail!("failed to accept transaction: {:?}", &test_txs);
@@ -122,26 +144,142 @@ impl Inscriber {
         Ok(reveal)
     }
 
+    pub async fn send_sats(
+        &self,
+        fee_rate: Amount,
+        secret: &SecretKey,
+        unspent_txout: &UnspentTxOut,
+        to: &Address<NetworkChecked>,
+        amount: Amount,
+    ) -> anyhow::Result<Txid> {
+        let keypair = Keypair::from_secret_key(&self.secp, secret);
+
+        let mut tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: vec![TxIn {
+                previous_output: OutPoint {
+                    txid: unspent_txout.txid,
+                    vout: unspent_txout.vout,
+                },
+                script_sig: ScriptBuf::new(),
+                sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+                witness: Witness::new(),
+            }],
+            output: vec![
+                TxOut {
+                    value: amount,
+                    script_pubkey: to.script_pubkey(),
+                },
+                TxOut {
+                    // change
+                    value: unspent_txout.amount, // will update later
+                    script_pubkey: unspent_txout.script_pubkey.clone(),
+                },
+            ],
+        };
+
+        let fee = {
+            let mut v_tx = tx.clone();
+            v_tx.input[0].witness = Witness::from_slice(&[&[0; SCHNORR_SIGNATURE_SIZE]]);
+            fee_rate
+                .checked_mul(v_tx.vsize() as u64)
+                .expect("should compute commit_tx fee")
+        };
+
+        let change_value = unspent_txout
+            .amount
+            .checked_sub(amount)
+            .ok_or_else(|| anyhow::anyhow!("should compute amount"))?;
+        if change_value > fee {
+            tx.output[1].value = change_value - fee;
+        } else {
+            tx.output.pop(); // no change
+        }
+
+        if unspent_txout.script_pubkey.is_p2tr() {
+            let mut sighasher = SighashCache::new(&mut tx);
+            let prevouts = vec![TxOut {
+                value: unspent_txout.amount,
+                script_pubkey: unspent_txout.script_pubkey.clone(),
+            }];
+            let sighash = sighasher
+                .taproot_key_spend_signature_hash(
+                    0,
+                    &Prevouts::All(&prevouts),
+                    TapSighashType::Default,
+                )
+                .expect("failed to construct sighash");
+
+            let tweaked: TweakedKeypair = keypair.tap_tweak(&self.secp, None);
+            let sig = self.secp.sign_schnorr(
+                &Message::from_digest(sighash.to_byte_array()),
+                &tweaked.to_inner(),
+            );
+
+            let signature = taproot::Signature {
+                sig,
+                hash_ty: TapSighashType::Default,
+            };
+
+            sighasher
+                .witness_mut(0)
+                .expect("getting mutable witness reference should work")
+                .push(&signature.to_vec());
+        } else if unspent_txout.script_pubkey.is_p2wpkh() {
+            let mut sighasher = SighashCache::new(&mut tx);
+            let sighash = sighasher
+                .p2wpkh_signature_hash(
+                    0,
+                    &unspent_txout.script_pubkey,
+                    unspent_txout.amount,
+                    EcdsaSighashType::All,
+                )
+                .expect("failed to create sighash");
+
+            let sig = self
+                .secp
+                .sign_ecdsa(&Message::from(sighash), &keypair.secret_key());
+            let signature = ecdsa::Signature {
+                sig,
+                hash_ty: EcdsaSighashType::All,
+            };
+            tx.input[0].witness = Witness::p2wpkh(&signature, &keypair.public_key());
+        } else {
+            anyhow::bail!("unsupported script_pubkey");
+        }
+
+        let test_txs = self.bitcoin.test_mempool_accept(&[&tx]).await?;
+        for r in &test_txs {
+            if !r.allowed {
+                anyhow::bail!("failed to accept transaction: {:?}", &test_txs);
+            }
+        }
+
+        let txid = self.bitcoin.send_transaction(&tx).await?;
+        Ok(txid)
+    }
+
     // return (to_spent_tx_out, unsigned_commit_tx, signed_reveal_tx)
     pub async fn build_inscription_transactions(
         &self,
         names: &Vec<Name>,
         fee_rate: Amount,
-        unspent_address: Address<NetworkChecked>,
         unspent_txouts: &Vec<UnspentTxOut>,
-        inscription_key_pair: Option<Keypair>,
-    ) -> anyhow::Result<(TxOut, Transaction, Transaction)> {
+        inscription_keypair: Option<Keypair>,
+    ) -> anyhow::Result<(UnspentTxOut, Transaction, Transaction)> {
         if names.is_empty() {
             anyhow::bail!("no names to inscribe");
         }
         if fee_rate.to_sat() == 0 {
             anyhow::bail!("fee rate cannot be zero");
         }
-        if unspent_address.network() != &self.network {
-            anyhow::bail!("unspent address is not on the same network as the inscriber");
-        }
         if unspent_txouts.is_empty() {
             anyhow::bail!("no unspent transaction out");
+        }
+
+        if let Some(name) = check_duplicate(names) {
+            anyhow::bail!("duplicate name {}", name);
         }
 
         for name in names {
@@ -159,28 +297,22 @@ impl Inscriber {
             }
         }
 
-        let input = TxOut {
-            value: unspent_tx.amount,
-            script_pubkey: unspent_address.script_pubkey(),
-        };
+        let keypair = inscription_keypair
+            .unwrap_or_else(|| Keypair::new(&self.secp, &mut rand::thread_rng()));
 
-        let (unsigned_commit_tx, signed_reveal_tx) = self.create_inscription_transactions(
-            names,
-            fee_rate,
-            input.clone(),
-            OutPoint {
-                txid: unspent_tx.txid,
-                vout: unspent_tx.vout,
-            },
-            inscription_key_pair,
-        )?;
-        Ok((input, unsigned_commit_tx, signed_reveal_tx))
+        let (unsigned_commit_tx, signed_reveal_tx) =
+            self.create_inscription_transactions(names, fee_rate, unspent_tx, &keypair)?;
+        Ok((unspent_tx.to_owned(), unsigned_commit_tx, signed_reveal_tx))
     }
 
     pub fn preview_inscription_transactions(
         names: &Vec<Name>,
         fee_rate: Amount,
     ) -> anyhow::Result<(Transaction, Transaction, Amount)> {
+        if let Some(name) = check_duplicate(names) {
+            anyhow::bail!("duplicate name {}", name);
+        }
+
         let mut reveal_script = ScriptBuf::builder()
             .push_slice([0; SCHNORR_PUBLIC_KEY_SIZE])
             .push_opcode(opcodes::all::OP_CHECKSIG)
@@ -206,7 +338,7 @@ impl Inscriber {
 
         let mut witness = Witness::default();
         witness.push(
-            Signature::from_slice(&[0; SCHNORR_SIGNATURE_SIZE])
+            taproot::Signature::from_slice(&[0; SCHNORR_SIGNATURE_SIZE])
                 .unwrap()
                 .to_vec(),
         );
@@ -263,14 +395,12 @@ impl Inscriber {
         &self,
         names: &Vec<Name>,
         fee_rate: Amount,
-        input: TxOut,
-        input_point: OutPoint,
-        inscription_key_pair: Option<Keypair>,
+        unspent_txout: &UnspentTxOut,
+        keypair: &Keypair,
     ) -> anyhow::Result<(Transaction, Transaction)> {
         // or use one-time KeyPair
-        let key_pair = inscription_key_pair
-            .unwrap_or_else(|| Keypair::new(&self.secp, &mut rand::thread_rng()));
-        let (public_key, _parity) = key_pair.x_only_public_key();
+
+        let (public_key, _parity) = keypair.x_only_public_key();
 
         let mut reveal_script = ScriptBuf::builder()
             .push_slice(public_key.serialize())
@@ -314,8 +444,8 @@ impl Inscriber {
                 witness: Witness::default(), // Filled in after signing.
             }],
             output: vec![TxOut {
-                value: input.value,
-                script_pubkey: input.script_pubkey.clone(),
+                value: unspent_txout.amount,
+                script_pubkey: unspent_txout.script_pubkey.clone(),
             }],
         };
 
@@ -323,7 +453,7 @@ impl Inscriber {
             let mut v_reveal_tx = reveal_tx.clone();
             let mut witness = Witness::default();
             witness.push(
-                Signature::from_slice(&[0; SCHNORR_SIGNATURE_SIZE])
+                taproot::Signature::from_slice(&[0; SCHNORR_SIGNATURE_SIZE])
                     .unwrap()
                     .to_vec(),
             );
@@ -339,13 +469,16 @@ impl Inscriber {
             version: Version::TWO,
             lock_time: LockTime::ZERO,
             input: vec![TxIn {
-                previous_output: input_point,
+                previous_output: OutPoint {
+                    txid: unspent_txout.txid,
+                    vout: unspent_txout.vout,
+                },
                 script_sig: ScriptBuf::new(),
                 sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
                 witness: Witness::new(),
             }],
             output: vec![TxOut {
-                value: input.value,
+                value: unspent_txout.amount,
                 script_pubkey: commit_tx_address.script_pubkey(),
             }],
         };
@@ -357,15 +490,14 @@ impl Inscriber {
                 .checked_mul(v_commit_tx.vsize() as u64)
                 .expect("should compute commit_tx fee")
         };
-        let change_value = input
-            .value
+        let change_value = unspent_txout
+            .amount
             .checked_sub(commit_tx_fee)
             .ok_or_else(|| anyhow::anyhow!("should compute commit_tx fee"))?;
 
         commit_tx.output[0].value = change_value;
 
-        let change_value = input
-            .value
+        let change_value = change_value
             .checked_sub(reveal_tx_fee)
             .ok_or_else(|| anyhow::anyhow!("should compute commit_tx fee"))?;
         if change_value <= dust_value {
@@ -393,13 +525,13 @@ impl Inscriber {
 
             let sig = self
                 .secp
-                .sign_schnorr(&Message::from_digest(sighash.to_byte_array()), &key_pair);
+                .sign_schnorr(&Message::from_digest(sighash.to_byte_array()), keypair);
 
             let witness = sighasher
                 .witness_mut(0)
                 .expect("getting mutable witness reference should work");
             witness.push(
-                Signature {
+                taproot::Signature {
                     sig,
                     hash_ty: TapSighashType::Default,
                 }
@@ -411,6 +543,17 @@ impl Inscriber {
 
         Ok((commit_tx, reveal_tx))
     }
+}
+
+pub fn check_duplicate(names: &Vec<Name>) -> Option<String> {
+    let mut set: HashSet<String> = HashSet::new();
+    for name in names {
+        if set.contains(&name.name) {
+            return Some(name.name.clone());
+        }
+        set.insert(name.name.clone());
+    }
+    None
 }
 
 #[cfg(test)]
@@ -475,19 +618,22 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn inscriber_works() {
-        dotenvy::from_filename(".env.sample").expect(".env file not found");
+        dotenvy::from_filename("sample.env").expect(".env file not found");
 
         let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
         let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
         let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
+        let network = Network::from_core_arg(&std::env::var("BITCOIN_NETWORK").unwrap_or_default())
+            .unwrap_or(Network::Regtest);
 
         let secp = Secp256k1::new();
-        let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
-        let (public_key, _parity) = key_pair.x_only_public_key();
+        let keypair = Keypair::new(&secp, &mut rand::thread_rng());
+        let (public_key, _parity) = keypair.x_only_public_key();
         let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
         let address: Address<NetworkChecked> =
-            Address::from_script(&script_pubkey, Network::Regtest).unwrap();
+            Address::from_script(&script_pubkey, network).unwrap();
 
+        println!("rpcurl: {}, network: {}", rpcurl, network);
         println!("address: {}", address);
 
         let inscriber = Inscriber::new(&InscriberOptions {
@@ -495,7 +641,7 @@ mod tests {
                 rpcurl,
                 rpcuser,
                 rpcpassword,
-                network: Network::Regtest,
+                network,
             },
         })
         .unwrap();
@@ -540,6 +686,7 @@ mod tests {
                         txid: tx.txid(),
                         vout: i as u32,
                         amount: v.value,
+                        script_pubkey: v.script_pubkey.clone(),
                     })
                 } else {
                     None
@@ -551,7 +698,7 @@ mod tests {
         let names = vec![get_name("0")];
         let fee_rate = Amount::from_sat(20);
         let txid = inscriber
-            .inscribe(&names, fee_rate, &key_pair.secret_key(), &unspent_txs, None)
+            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs, None)
             .await
             .unwrap();
         println!("txid: {}", txid);
@@ -591,6 +738,7 @@ mod tests {
                         txid: tx.txid(),
                         vout: i as u32,
                         amount: v.value,
+                        script_pubkey: v.script_pubkey.clone(),
                     })
                 } else {
                     None
@@ -613,9 +761,9 @@ mod tests {
             .inscribe(
                 &names,
                 fee_rate,
-                &key_pair.secret_key(),
+                &keypair.secret_key(),
                 &unspent_txs,
-                Some(key_pair),
+                Some(keypair),
             )
             .await
             .unwrap();

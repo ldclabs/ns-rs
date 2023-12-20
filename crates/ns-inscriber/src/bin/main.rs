@@ -1,46 +1,652 @@
-use bitcoin::{
-    address::NetworkChecked,
-    secp256k1::{rand, Keypair, Secp256k1},
-    Address, Network, ScriptBuf,
+use anyhow::anyhow;
+use bitcoin::{address::NetworkChecked, Address, Amount, Network, PublicKey, ScriptBuf, Txid};
+use chrono::{Local, SecondsFormat};
+use clap::{Parser, Subcommand};
+use ns_protocol::ns::valid_name;
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
 };
-use dotenvy::dotenv;
-use structured_logger::{async_json::new_writer, Builder};
+// use sys_locale::get_locale;
+use coset::{CoseEncrypt0, TaggedCborSerializable};
+use terminal_prompt::Terminal;
 
-use ns_inscriber::bitcoin::BitCoinRPCOptions;
-use ns_inscriber::inscriber::{Inscriber, InscriberOptions};
+use ns_inscriber::{
+    bitcoin::BitCoinRPCOptions,
+    inscriber::{Inscriber, InscriberOptions, UnspentTxOut},
+    wallet::{
+        base64_decode, base64_encode, base64url_decode, base64url_encode, ed25519, hash_256, iana,
+        secp256k1, unwrap_cbor_tag, wrap_cbor_tag, DerivationPath, Encrypt0, Key,
+    },
+};
+use ns_protocol::ns::{Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value};
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
+const AAD: &[u8; 12] = b"ns-inscriber";
+
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    /// Run with a env config file
+    #[arg(short, long, value_name = "FILE", default_value = ".env")]
+    config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// generate a new KEK used to protect other keys
+    NewKEK {
+        /// alias for the new KEK key
+        #[arg(short, long)]
+        alias: String,
+    },
+    /// generate a new Secp256k1 seed key that protected by KEK
+    Secp256k1Seed {},
+    /// generate a new Ed25519 seed key that protected by KEK
+    Ed25519Seed {},
+    /// Derive a Secp256k1 key from seed, it is protected by KEK.
+    /// Options Will be combined to "m/44'/0'/{acc}'/1'/{idx}" (BIP-32/44)
+    Secp256k1Derive {
+        #[arg(long, default_value_t = 0)]
+        acc: u32,
+        #[arg(long, default_value_t = 0)]
+        idx: u32,
+    },
+    /// Derive a Ed25519 key from seed, it is protected by KEK.
+    /// Options Will be combined to "m/42'/0'/{acc}'/1'/{idx}" (BIP-32/44)
+    Ed25519Derive {
+        #[arg(long, default_value_t = 0)]
+        acc: u32,
+        #[arg(long, default_value_t = 0)]
+        idx: u32,
+    },
+    /// List keys in keys dir.
+    ListKeys {},
+    /// Display secp256k1 addresses
+    Secp256k1Address {
+        /// secp256k key file name, will be combined to "{key}.cose.key" to read secp256k key
+        #[arg(long, value_name = "FILE")]
+        key: String,
+    },
+    SignMessage {
+        /// Ed25519 or Secp256k1 key file name, will be combined to "{key}.cose.key" to read key
+        #[arg(long, value_name = "FILE")]
+        key: String,
+        /// message to sign
+        #[arg(long)]
+        msg: String,
+        /// output encoding format, default is base64, can be "hex"
+        #[arg(long, default_value = "base64")]
+        enc: String,
+    },
+    VerifyMessage {
+        /// Ed25519 or Secp256k1 key file name, will be combined to "{key}.cose.key" to read key
+        #[arg(long, value_name = "FILE")]
+        key: String,
+        /// message to verify
+        #[arg(long)]
+        msg: String,
+        /// signature to verify
+        #[arg(long)]
+        sig: String,
+        /// signature encoding format, default is base64, can be "hex"
+        #[arg(long, default_value = "base64")]
+        enc: String,
+    },
+    /// Send sats from tx to a bitcoin address
+    SendSats {
+        /// Unspent transaction id to spend
+        #[arg(long)]
+        txid: String,
+        /// Bitcoin address on tx to spend, will be combined to "{addr}.cose.key" to read secp256k key
+        #[arg(long, value_name = "FILE")]
+        addr: String,
+        /// Bitcoin address to receive sats
+        #[arg(long)]
+        to: String,
+        /// Amount of satoshis to send
+        #[arg(long)]
+        amount: u64,
+        /// fee rate in sat/vbyte
+        #[arg(long)]
+        fee: u64,
+    },
+    /// Preview inscription transactions and min cost
+    Preview {
+        /// fee rate in sat/vbyte
+        #[arg(long)]
+        fee: u64,
+        /// ed25519 key file name, will be combined to "{key}.cose.key" to read ed25519 key
+        #[arg(long, value_name = "FILE")]
+        key: String,
+        /// names to inscribe, separated by comma
+        #[arg(long)]
+        names: String,
+    },
+    /// Inscribe names to a transaction
+    Inscribe {
+        /// Unspent transaction id to spend
+        #[arg(long)]
+        txid: String,
+        /// Bitcoin address on tx to operate on, will be combined to "{addr}.cose.key" to read secp256k key
+        #[arg(long, value_name = "FILE")]
+        addr: String,
+        /// fee rate in sat/vbyte
+        #[arg(long)]
+        fee: u64,
+        /// ed25519 key file name, will be combined to "{key}.cose.key" to read ed25519 key
+        #[arg(long, value_name = "FILE")]
+        key: String,
+        /// names to inscribe, separated by comma
+        #[arg(long)]
+        names: String,
+    },
+}
+
+#[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenv().expect(".env file not found");
+    // let locale = get_locale().unwrap_or_else(|| String::from("en-US"));
+    // println!("The current locale is {}", locale);
 
-    Builder::with_level("info")
-        .with_target_writer("*", new_writer(tokio::io::stdout()))
-        .init();
+    let cli = Cli::parse();
 
+    let config_path = cli.config.as_deref().expect("config path not found");
+    dotenvy::from_filename(config_path).expect(".env file not found");
+
+    let keys_path = std::env::var("INSCRIBER_KEYS_DIR").unwrap_or("./keys".to_string());
+    let keys_path = Path::new(&keys_path);
+    if std::fs::read_dir(keys_path).is_err() {
+        std::fs::create_dir_all(keys_path)?;
+    }
+
+    let network = Network::from_core_arg(&std::env::var("BITCOIN_NETWORK").unwrap_or_default())
+        .unwrap_or(Network::Regtest);
+
+    println!("Bitcoin network: {}", network);
+
+    match &cli.command {
+        Some(Commands::NewKEK { alias }) => {
+            let mut terminal = Terminal::open()?;
+            let password = terminal.prompt_sensitive("Enter a password to protect KEK")?;
+            let mkek = hash_256(password.as_bytes());
+            let kid = if alias.is_empty() {
+                Local::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+            } else {
+                alias.to_owned()
+            };
+            let encryptor = Encrypt0::new(mkek);
+            let kek = Key::new_sym(iana::Algorithm::A256GCM, kid.as_bytes())?;
+            let data = encryptor.encrypt(&kek.to_vec()?, AAD, kid.as_bytes())?;
+            let data = wrap_cbor_tag(&data);
+            println!(
+                "Put this new KEK as INSCRIBER_KEK on config file:\n{}",
+                base64url_encode(&data)
+            );
+        }
+
+        Some(Commands::Secp256k1Seed {}) => {
+            let file = keys_path.join("secp256k1-seed.cose.key");
+            if KekEncryptor::key_exists(&file) {
+                println!("{} exists, skipping key generation", file.display());
+                return Ok(());
+            }
+
+            let kek = KekEncryptor::open()?;
+            let secp = secp256k1::Secp256k1::new();
+            let keypair = secp256k1::new_secp256k1(&secp);
+            let (public_key, _parity) = keypair.x_only_public_key();
+            let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
+            let address: Address<NetworkChecked> =
+                Address::from_script(&script_pubkey, network).unwrap();
+            let key = Key::secp256k1_from_keypair(&keypair, address.to_string().as_bytes())?;
+            kek.save_key(&file, key)?;
+            println!("key: {}, address: {}", file.display(), address);
+            return Ok(());
+        }
+
+        Some(Commands::Secp256k1Derive { acc, idx }) => {
+            let kek = KekEncryptor::open()?;
+            let seed_key = kek.read_key(&keys_path.join("secp256k1-seed.cose.key"))?;
+            let kid = format!("m/44'/0'/{acc}'/1'/{idx}'");
+            let path: DerivationPath = kid.parse()?;
+            let secp = secp256k1::Secp256k1::new();
+            let keypair =
+                secp256k1::derive_secp256k1(&secp, network, &seed_key.secret_key()?, &path)?;
+            let address = Address::p2wpkh(
+                &PublicKey {
+                    compressed: true,
+                    inner: keypair.public_key(),
+                },
+                network,
+            )?;
+            let key = Key::secp256k1_from_keypair(&keypair, kid.as_bytes())?;
+            let file = keys_path.join(format!("{}.cose.key", address));
+            kek.save_key(&file, key)?;
+            println!("key: {}, address: {}", file.display(), address);
+            return Ok(());
+        }
+
+        Some(Commands::Ed25519Seed {}) => {
+            let file = keys_path.join("ed25519-seed.cose.key");
+            if KekEncryptor::key_exists(&file) {
+                println!("{} exists, skipping key generation", file.display());
+                return Ok(());
+            }
+
+            let kek = KekEncryptor::open()?;
+            let signing_key = ed25519::new_ed25519();
+            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
+            let key = Key::ed25519_from_secret(signing_key.as_bytes(), address.as_bytes())?;
+            kek.save_key(&file, key)?;
+            println!("key: {}, public key: {}", file.display(), address);
+            return Ok(());
+        }
+
+        Some(Commands::Ed25519Derive { acc, idx }) => {
+            let kek = KekEncryptor::open()?;
+            let seed_key = kek.read_key(&keys_path.join("ed25519-seed.cose.key"))?;
+            let kid = format!("m/42'/0'/{acc}'/1'/{idx}'");
+            let path: DerivationPath = kid.parse()?;
+            let signing_key = ed25519::derive_ed25519(&seed_key.secret_key()?, &path);
+            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
+            let key = Key::ed25519_from_secret(signing_key.as_bytes(), kid.as_bytes())?;
+            let file = keys_path.join(format!("{}.cose.key", address));
+            kek.save_key(&file, key)?;
+            println!("key: {}, public key: {}", file.display(), address);
+            return Ok(());
+        }
+
+        Some(Commands::ListKeys {}) => {
+            for entry in std::fs::read_dir(keys_path)? {
+                let path = entry?.path();
+                if path.is_file() {
+                    let data = std::fs::read(&path)?;
+                    let filename = &path
+                        .file_name()
+                        .expect("should get file name")
+                        .to_string_lossy();
+                    let data = unwrap_cbor_tag(&data);
+                    let e0 = CoseEncrypt0::from_tagged_slice(data).map_err(anyhow::Error::msg)?;
+                    let key_id = String::from_utf8_lossy(&e0.unprotected.key_id);
+                    if key_id.starts_with("m/") {
+                        println!("\nkey file: {}\nkey derived path: {}", filename, key_id);
+                    } else {
+                        println!("\nkey file: {}\nkey id: {}", filename, key_id);
+                    }
+                }
+            }
+
+            return Ok(());
+        }
+
+        Some(Commands::Secp256k1Address { key }) => {
+            let kek = KekEncryptor::open()?;
+            let secp256k1_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
+            if !secp256k1_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                anyhow::bail!("{} is not a secp256k1 key", key);
+            }
+            let secp = secp256k1::Secp256k1::new();
+            let keypair =
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+            let (public_key, _parity) = keypair.x_only_public_key();
+            let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
+            let address: Address<NetworkChecked> =
+                Address::from_script(&script_pubkey, network).unwrap();
+            println!("p2tr address: {}", address);
+
+            let address = Address::p2pkh(
+                &PublicKey {
+                    compressed: true,
+                    inner: keypair.public_key(),
+                },
+                network,
+            );
+            println!("p2pkh address: {}", address);
+
+            let address = Address::p2wpkh(
+                &PublicKey {
+                    compressed: true,
+                    inner: keypair.public_key(),
+                },
+                network,
+            )?;
+            println!("p2wpkh address: {}", address);
+            return Ok(());
+        }
+
+        Some(Commands::SignMessage { key, msg, enc }) => {
+            let kek = KekEncryptor::open()?;
+            let cose_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
+            println!("message: {}", msg);
+
+            if cose_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                let secp = secp256k1::Secp256k1::new();
+                let keypair =
+                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.secret_key()?)?;
+
+                let sig = secp256k1::sign_message(&secp, &keypair.secret_key(), msg);
+                if enc == "hex" {
+                    println!("signature:\n{}", hex::encode(sig.serialize()));
+                } else {
+                    println!("signature:\n{}", base64_encode(&sig.serialize()));
+                }
+            } else if cose_key.is_crv(iana::EllipticCurve::Ed25519) {
+                let signing_key = ed25519::SigningKey::from_bytes(&cose_key.secret_key()?);
+                let sig = ed25519::sign_message(&signing_key, msg);
+                if enc == "hex" {
+                    println!("signature:\n{}", hex::encode(sig.to_bytes()));
+                } else {
+                    println!("signature:\n{}", base64_encode(&sig.to_bytes()));
+                }
+            } else {
+                println!("unsupported key type");
+            }
+            return Ok(());
+        }
+
+        Some(Commands::VerifyMessage { key, msg, sig, enc }) => {
+            let kek = KekEncryptor::open()?;
+            let cose_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
+            let sig = if enc == "hex" {
+                hex::decode(sig)?
+            } else {
+                base64_decode(sig)?
+            };
+            if cose_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                let secp = secp256k1::Secp256k1::new();
+
+                let keypair =
+                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.secret_key()?)?;
+                secp256k1::verify_message(&secp, &keypair.public_key(), msg, &sig)?;
+
+                println!("signature is valid");
+            } else if cose_key.is_crv(iana::EllipticCurve::Ed25519) {
+                let signing_key = ed25519::SigningKey::from_bytes(&cose_key.secret_key()?);
+                ed25519::verify_message(&signing_key.verifying_key(), msg, &sig)?;
+
+                println!("signature is valid");
+            } else {
+                println!("unsupported key type");
+            }
+            return Ok(());
+        }
+
+        Some(Commands::SendSats {
+            txid,
+            addr,
+            to,
+            amount,
+            fee,
+        }) => {
+            let txid: Txid = txid.parse()?;
+            let to = Address::from_str(to)?.require_network(network)?;
+            let amount = Amount::from_sat(*amount);
+            let fee_rate = Amount::from_sat(*fee);
+
+            let kek = KekEncryptor::open()?;
+            let secp256k1_key = kek.read_key(&keys_path.join(format!("{addr}.cose.key")))?;
+            if !secp256k1_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                anyhow::bail!("{} is not a secp256k1 key", addr);
+            }
+            let secp = secp256k1::Secp256k1::new();
+            let keypair =
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+            let (p2wpkh_pubkey, p2tr_pubkey) = secp256k1::as_script_pubkey(&secp, &keypair);
+
+            let inscriber = get_inscriber(network).await?;
+            let tx = inscriber.bitcoin.get_transaction(&txid).await?;
+            let (vout, txout) = tx
+                .output
+                .iter()
+                .enumerate()
+                .find(|(_, o)| {
+                    o.value > amount
+                        && (o.script_pubkey == p2wpkh_pubkey || o.script_pubkey == p2tr_pubkey)
+                })
+                .ok_or(anyhow!("no matched transaction out to spend"))?;
+            let txid = inscriber
+                .send_sats(
+                    fee_rate,
+                    &keypair.secret_key(),
+                    &UnspentTxOut {
+                        txid,
+                        vout: vout as u32,
+                        amount: txout.value,
+                        script_pubkey: txout.script_pubkey.clone(),
+                    },
+                    &to,
+                    amount,
+                )
+                .await?;
+
+            println!("txid: {}", txid);
+            return Ok(());
+        }
+
+        Some(Commands::Preview { fee, key, names }) => {
+            let fee_rate = Amount::from_sat(*fee);
+            let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).collect();
+            for name in &names {
+                if !valid_name(name) {
+                    return Err(anyhow!("invalid name to inscribe: {}", name));
+                }
+            }
+            if names.is_empty() {
+                return Err(anyhow!("no names to inscribe"));
+            }
+
+            let kek = KekEncryptor::open()?;
+            let ed25519_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
+            if !ed25519_key.is_crv(iana::EllipticCurve::Ed25519) {
+                anyhow::bail!("{} is not a ed25519 key", key);
+            }
+            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
+            let params = PublicKeyParams {
+                public_keys: vec![signing_key.verifying_key().to_bytes().to_vec()],
+                threshold: None,
+                kind: None,
+            };
+
+            let mut ns: Vec<Name> = Vec::with_capacity(names.len());
+            for name in &names {
+                let mut n = Name {
+                    name: name.clone(),
+                    sequence: 0,
+                    payload: Service {
+                        code: 0,
+                        operations: vec![Operation {
+                            subcode: 1,
+                            params: Value::from(&params),
+                        }],
+                        approver: None,
+                    },
+                    signatures: vec![],
+                };
+                n.sign(
+                    &params,
+                    ThresholdLevel::All,
+                    &[signing_key.as_bytes().to_vec()],
+                )?;
+                n.validate()?;
+                ns.push(n);
+            }
+
+            let res = Inscriber::preview_inscription_transactions(&ns, fee_rate)?;
+
+            println!(
+                "commit_tx: {} bytes, {} vBytes",
+                res.0.total_size(),
+                res.0.vsize()
+            );
+            println!(
+                "reveal_tx: {} bytes, {} vBytes",
+                res.1.total_size(),
+                res.1.vsize()
+            );
+            println!("total bytes: {}", res.0.total_size() + res.1.total_size());
+            println!("min cost: {}", res.2);
+            return Ok(());
+        }
+
+        Some(Commands::Inscribe {
+            txid,
+            addr,
+            fee,
+            key,
+            names,
+        }) => {
+            let txid: Txid = txid.parse()?;
+            let fee_rate = Amount::from_sat(*fee);
+            let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).collect();
+            for name in &names {
+                if !valid_name(name) {
+                    return Err(anyhow!("invalid name to inscribe: {}", name));
+                }
+            }
+            if names.is_empty() {
+                return Err(anyhow!("no names to inscribe"));
+            }
+
+            let kek = KekEncryptor::open()?;
+            let ed25519_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
+            if !ed25519_key.is_crv(iana::EllipticCurve::Ed25519) {
+                anyhow::bail!("{} is not a ed25519 key", key);
+            }
+            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
+            let params = PublicKeyParams {
+                public_keys: vec![signing_key.verifying_key().to_bytes().to_vec()],
+                threshold: None,
+                kind: None,
+            };
+
+            let mut ns: Vec<Name> = Vec::with_capacity(names.len());
+            for name in &names {
+                let mut n = Name {
+                    name: name.clone(),
+                    sequence: 0,
+                    payload: Service {
+                        code: 0,
+                        operations: vec![Operation {
+                            subcode: 1,
+                            params: Value::from(&params),
+                        }],
+                        approver: None,
+                    },
+                    signatures: vec![],
+                };
+                n.sign(
+                    &params,
+                    ThresholdLevel::All,
+                    &[signing_key.as_bytes().to_vec()],
+                )?;
+                n.validate()?;
+                ns.push(n);
+            }
+
+            let secp256k1_key = kek.read_key(&keys_path.join(format!("{addr}.cose.key")))?;
+            if !secp256k1_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                anyhow::bail!("{} is not a secp256k1 key", key);
+            }
+            let secp = secp256k1::Secp256k1::new();
+            let keypair =
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+            let (p2wpkh_pubkey, p2tr_pubkey) = secp256k1::as_script_pubkey(&secp, &keypair);
+
+            let inscriber = get_inscriber(network).await?;
+            let tx = inscriber.bitcoin.get_transaction(&txid).await?;
+            let (vout, txout) = tx
+                .output
+                .iter()
+                .enumerate()
+                .find(|(_, o)| o.script_pubkey == p2wpkh_pubkey || o.script_pubkey == p2tr_pubkey)
+                .ok_or(anyhow!("no matched transaction out to spend"))?;
+            let txid = inscriber
+                .inscribe(
+                    &ns,
+                    fee_rate,
+                    &keypair.secret_key(),
+                    &vec![UnspentTxOut {
+                        txid,
+                        vout: vout as u32,
+                        amount: txout.value,
+                        script_pubkey: txout.script_pubkey.clone(),
+                    }],
+                    None,
+                )
+                .await?;
+
+            println!("txid: {}", txid);
+            return Ok(());
+        }
+
+        None => {}
+    }
+
+    Ok(())
+}
+
+struct KekEncryptor {
+    encryptor: Encrypt0,
+}
+
+impl KekEncryptor {
+    fn open() -> anyhow::Result<Self> {
+        let kek_str = std::env::var("INSCRIBER_KEK").unwrap_or_default();
+        if kek_str.is_empty() {
+            println!("INSCRIBER_KEK not found");
+            println!("KEK is used to protect other keys");
+            println!("Run `ns-inscriber new-kek --alias=mykek` to generate a new KEK`");
+            return Err(anyhow::Error::msg("INSCRIBER_KEK not found"));
+        }
+
+        let mut terminal = Terminal::open()?;
+        let password = terminal.prompt_sensitive("Enter a password to protect KEK: ")?;
+        let mkek = hash_256(password.as_bytes());
+        let decryptor = Encrypt0::new(mkek);
+        let ciphertext = base64url_decode(kek_str.trim())?;
+        let key = decryptor.decrypt(unwrap_cbor_tag(&ciphertext), AAD)?;
+        let key = Key::from_slice(&key)?;
+        Ok(KekEncryptor {
+            encryptor: Encrypt0::new(key.secret_key()?),
+        })
+    }
+
+    fn key_exists(file: &Path) -> bool {
+        std::fs::read(file).is_ok()
+    }
+
+    fn read_key(&self, file: &Path) -> anyhow::Result<Key> {
+        let data = std::fs::read(file)?;
+        let key = self.encryptor.decrypt(unwrap_cbor_tag(&data), AAD)?;
+        Key::from_slice(&key)
+    }
+
+    fn save_key(&self, file: &Path, key: Key) -> anyhow::Result<()> {
+        let kid = key.key_id();
+        let data = self
+            .encryptor
+            .encrypt(key.to_vec()?.as_slice(), AAD, &kid)?;
+        std::fs::write(file, wrap_cbor_tag(&data))?;
+        Ok(())
+    }
+}
+
+async fn get_inscriber(network: Network) -> anyhow::Result<Inscriber> {
     let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
     let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
     let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
-
-    let secp = Secp256k1::new();
-    let key_pair = Keypair::new(&secp, &mut rand::thread_rng());
-    let (public_key, _parity) = key_pair.x_only_public_key();
-    let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
-    let address: Address<NetworkChecked> =
-        Address::from_script(&script_pubkey, Network::Regtest).unwrap();
-
-    println!("address: {}", address);
 
     let inscriber = Inscriber::new(&InscriberOptions {
         bitcoin: BitCoinRPCOptions {
             rpcurl,
             rpcuser,
             rpcpassword,
-            network: Network::Regtest,
+            network,
         },
-    })
-    .unwrap();
+    })?;
 
-    inscriber.bitcoin.ping().await.unwrap();
-    // ToDO
-    Ok(())
+    inscriber.bitcoin.ping().await?;
+    Ok(inscriber)
 }

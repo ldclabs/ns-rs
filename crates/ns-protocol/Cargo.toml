@@ -22,5 +22,5 @@ finl_unicode = "1.2.0"
 sha3 = "0.10"
 
 [dev-dependencies]
-faster-hex = "0.8"
+hex = "0.4"
 hex-literal = "0.4"

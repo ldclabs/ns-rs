@@ -1,6 +1,6 @@
-use bitcoin::{hashes::Hash, BlockHash};
+use bitcoin::{hashes::Hash, BlockHash, Transaction};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashSet, VecDeque},
     sync::Arc,
 };
 use tokio::sync::RwLock;
@@ -15,27 +15,33 @@ use crate::db::{
     scylladb::{ScyllaDB, ScyllaDBOptions},
 };
 use crate::envelope::Envelope;
+use crate::utxo::UTXO;
 
 const ACCEPTED_DISTANCE: u64 = 6; // 6 blocks before the best block
 
 pub struct IndexerOptions {
     pub scylla: ScyllaDBOptions,
+    pub index_utxo: bool,
 }
 
 #[derive(Clone)]
 pub struct Indexer {
     pub(crate) scylla: Arc<ScyllaDB>,
     pub(crate) state: Arc<IndexerState>,
+    index_utxo: bool,
 }
 
-pub type InscriptionState = (NameState, ServiceState, Option<ServiceProtocol>);
+type InscriptionState = (NameState, ServiceState, Option<ServiceProtocol>);
+// (block_height, spents, unspents)
+type UTXOState = (u64, Vec<UTXO>, Vec<(Vec<u8>, UTXO)>);
 
 pub struct IndexerState {
     pub(crate) last_accepted_height: RwLock<u64>,
     pub(crate) last_accepted: RwLock<Option<Inscription>>,
-    pub(crate) best_inscriptions: RwLock<Vec<Inscription>>,
+    pub(crate) best_inscriptions: RwLock<VecDeque<Inscription>>,
     // protocols: RwLock<BTreeMap<u64, ServiceProtocol>>,
-    pub(crate) confirming_names: RwLock<BTreeMap<String, Vec<InscriptionState>>>,
+    pub(crate) confirming_names: RwLock<BTreeMap<String, VecDeque<InscriptionState>>>,
+    pub(crate) confirming_utxos: RwLock<VecDeque<UTXOState>>,
 }
 
 impl Indexer {
@@ -46,10 +52,12 @@ impl Indexer {
             state: Arc::new(IndexerState {
                 last_accepted_height: RwLock::new(0),
                 last_accepted: RwLock::new(None),
-                best_inscriptions: RwLock::new(Vec::with_capacity(1024)),
+                best_inscriptions: RwLock::new(VecDeque::with_capacity(1024)),
                 // protocols: RwLock::new(BTreeMap::new()),
                 confirming_names: RwLock::new(BTreeMap::new()),
+                confirming_utxos: RwLock::new(VecDeque::with_capacity(1024)),
             }),
+            index_utxo: opts.index_utxo,
         })
     }
 
@@ -88,7 +96,7 @@ impl Indexer {
         block_hash: &BlockHash,
         block_height: u64,
         block_time: u64,
-        envelopes: Vec<Envelope>,
+        tx: Transaction,
     ) -> anyhow::Result<()> {
         let accepted_height = {
             let last_accepted_height_state = self.state.last_accepted_height.read().await;
@@ -103,7 +111,7 @@ impl Indexer {
             self.save_accepted(accepted_height).await?;
         }
 
-        for envelope in envelopes {
+        for envelope in Envelope::from_transaction(&tx) {
             for name in envelope.payload {
                 match self.index_name(block_height, block_time, &name).await {
                     Err(err) => {
@@ -147,7 +155,7 @@ impl Indexer {
                             let mut best_inscriptions_state =
                                 self.state.best_inscriptions.write().await;
 
-                            match best_inscriptions_state.last() {
+                            match best_inscriptions_state.back() {
                                 Some(prev_best_inscription) => {
                                     inscription.height = prev_best_inscription.height + 1;
                                     inscription.previous_hash = prev_best_inscription
@@ -168,11 +176,17 @@ impl Indexer {
                                 },
                             }
 
-                            best_inscriptions_state.push(inscription);
+                            best_inscriptions_state.push_back(inscription);
                         }
                     }
                 }
             }
+        }
+
+        if self.index_utxo {
+            let (spent, unspent) = UTXO::from_transaction(&tx);
+            let mut confirming_utxos = self.state.confirming_utxos.write().await;
+            confirming_utxos.push_back((block_height, spent, unspent));
         }
 
         Ok(())
@@ -224,7 +238,7 @@ impl Indexer {
         let mut prev_state: (Option<NameState>, Option<ServiceState>) = {
             let confirming_names = self.state.confirming_names.read().await;
             if let Some(names) = confirming_names.get(&name.name) {
-                let prev_name_state = names.last().map(|(name_state, _, _)| name_state);
+                let prev_name_state = names.back().map(|(name_state, _, _)| name_state);
                 let prev_service_state = names
                     .iter()
                     .filter_map(|(_, service_state, _)| {
@@ -279,7 +293,7 @@ impl Indexer {
 
             let mut confirming_names = self.state.confirming_names.write().await;
             if !confirming_names.contains_key(&name.name) {
-                confirming_names.insert(name.name.clone(), vec![]);
+                confirming_names.insert(name.name.clone(), VecDeque::new());
             }
 
             let names = confirming_names
@@ -288,7 +302,7 @@ impl Indexer {
 
             let name_state_hash = name_state.hash()?;
             let service_state_hash = service_state.hash()?;
-            names.push((name_state, service_state, None));
+            names.push_back((name_state, service_state, None));
             return Ok((name_state_hash, service_state_hash, None));
         }
 
@@ -343,7 +357,10 @@ impl Indexer {
         let name_state_hash = name_state.hash()?;
         let service_state_hash = service_state.hash()?;
         let mut confirming_names = self.state.confirming_names.write().await;
-        confirming_names.insert(name.name.clone(), vec![(name_state, service_state, None)]);
+        confirming_names.insert(
+            name.name.clone(),
+            VecDeque::from([(name_state, service_state, None)]),
+        );
 
         Ok((name_state_hash, service_state_hash, None))
     }
@@ -359,16 +376,17 @@ impl Indexer {
 
             let mut empty_names: Vec<String> = Vec::new();
             for (name, names) in confirming_names.iter_mut() {
-                while let Some(head) = names.first() {
+                while let Some(head) = names.front() {
                     if head.0.block_height > accepted_height {
                         break;
                     }
 
-                    let (name_state, service_state, protocol_state) = names.remove(0);
-                    name_states.push(name_state);
-                    service_states.push(service_state);
-                    if let Some(protocol_state) = protocol_state {
-                        protocol_states.push(protocol_state);
+                    if let Some((name_state, service_state, protocol_state)) = names.pop_front() {
+                        name_states.push(name_state);
+                        service_states.push(service_state);
+                        if let Some(protocol_state) = protocol_state {
+                            protocol_states.push(protocol_state);
+                        }
                     }
                 }
 
@@ -386,11 +404,13 @@ impl Indexer {
 
         {
             let mut best_inscriptions_state = self.state.best_inscriptions.write().await;
-            while let Some(inscription) = best_inscriptions_state.first() {
+            while let Some(inscription) = best_inscriptions_state.front() {
                 if inscription.block_height > accepted_height {
                     break;
                 }
-                inscriptions.push(best_inscriptions_state.remove(0));
+                if let Some(inscription) = best_inscriptions_state.pop_front() {
+                    inscriptions.push(inscription);
+                }
             }
         }
 
@@ -477,6 +497,25 @@ impl Indexer {
         }
         if !fresh_pubkey_names.is_empty() {
             db::NameState::batch_add_pubkey_names(&self.scylla, fresh_pubkey_names).await?;
+        }
+
+        let mut utxos: Vec<UTXOState> = Vec::new();
+        if self.index_utxo {
+            let mut confirming_utxos = self.state.confirming_utxos.write().await;
+
+            while let Some(utxo) = confirming_utxos.front() {
+                if utxo.0 > accepted_height {
+                    break;
+                }
+                if let Some(utxo) = confirming_utxos.pop_front() {
+                    utxos.push(utxo);
+                }
+            }
+        }
+        if !utxos.is_empty() {
+            for utxo in utxos {
+                db::Utxo::handle_utxo(&self.scylla, &utxo.1, &utxo.2).await?;
+            }
         }
 
         Ok(())

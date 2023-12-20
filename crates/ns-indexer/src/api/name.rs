@@ -67,8 +67,12 @@ impl NameAPI {
     ) -> Result<PackObject<SuccessResponse<Vec<String>>>, HTTPError> {
         input.validate()?;
 
-        let mut pubkey = [0u8; 32];
-        faster_hex::hex_decode(input.pubkey.as_bytes(), &mut pubkey)
+        let key = if input.pubkey.starts_with("0x") {
+            &input.pubkey[2..]
+        } else {
+            input.pubkey.as_str()
+        };
+        let pubkey = hex::decode(key)
             .map_err(|_| HTTPError::new(400, format!("Invalid pubkey: {}", input.pubkey)))?;
         ctx.set_kvs(vec![("action", "list_names_by_pubkey".into())])
             .await;

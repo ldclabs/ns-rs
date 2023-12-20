@@ -146,6 +146,7 @@ pub fn valid_name(name: &str) -> bool {
             || c.is_punctuation()
             || c.is_separator()
             || c.is_mark()
+            || c.is_symbol()
             || c.is_other()
         {
             return false;
@@ -696,12 +697,11 @@ fn kind_of_value(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use faster_hex::hex_string;
     use hex_literal::hex;
 
     #[test]
     fn valid_name_works() {
-        for name in &["a", "abc", "公信", "0", "🀄", "b0"] {
+        for name in &["a", "abc", "公信", "0", "b0"] {
             assert!(valid_name(name), "{} is invalid", name)
         }
         for name in &[
@@ -720,11 +720,27 @@ mod tests {
             "——",
             "\0",
             "\u{301}",
+            "🀄",
             "❤️‍🔥",
             "a\u{301}",
         ] {
             assert!(!valid_name(name), "{} is valid", name)
         }
+    }
+
+    #[test]
+    fn check_ascii_name() {
+        let mut i = 0;
+        let mut result: String = String::new();
+        while i < 127 {
+            let s = char::from(i).to_string();
+            // println!("{}>{}<: {}", i, s, valid_name(&s));
+            if valid_name(&s) {
+                result.push_str(&s)
+            }
+            i += 1;
+        }
+        assert_eq!(result, "0123456789abcdefghijklmnopqrstuvwxyz");
     }
 
     #[test]
@@ -776,7 +792,7 @@ mod tests {
         )]);
 
         let data = name.to_bytes().unwrap();
-        assert_eq!(hex_string(&data), "d83584616100820081820182815820ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee60189026601815840e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c");
+        assert_eq!(hex::encode(&data), "d83584616100820081820182815820ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee60189026601815840e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c");
         // 53(["a", 0, [0, [[1, [[h'ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266'], 1]]]], [h'e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c']])
 
         let name2 = Name::decode_from(&data[..]).unwrap();

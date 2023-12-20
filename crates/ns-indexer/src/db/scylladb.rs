@@ -186,7 +186,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn exec_cqls_works() {
-        dotenvy::from_filename(".env.sample").expect(".env file not found");
+        dotenvy::from_filename("sample.env").expect(".env file not found");
         let db = get_db().await;
 
         let schema = std::include_str!("../../cql/schema.cql");

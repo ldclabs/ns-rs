@@ -13,10 +13,12 @@ use crate::indexer::{Indexer, IndexerState};
 mod inscription;
 mod name;
 mod service;
+mod utxo;
 
 pub use inscription::InscriptionAPI;
 pub use name::NameAPI;
 pub use service::ServiceAPI;
+pub use utxo::UtxoAPI;
 
 #[derive(Serialize, Deserialize)]
 pub struct AppVersion {
@@ -97,6 +99,11 @@ pub struct QueryNamePagination {
 #[derive(Debug, Deserialize, Validate)]
 pub struct QueryPubkey {
     pub pubkey: String,
+}
+
+#[derive(Debug, Deserialize, Validate)]
+pub struct QueryAddress {
+    pub address: String,
 }
 
 fn validate_name(name: &str) -> Result<(), ValidationError> {

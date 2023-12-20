@@ -123,3 +123,18 @@ CREATE TABLE IF NOT EXISTS checkpoint (
     AND compaction = {'class': 'SizeTieredCompactionStrategy'}
     AND compression = {'sstable_compression': 'LZ4Compressor'}
     AND default_time_to_live = 0;
+
+CREATE TABLE IF NOT EXISTS utxo (
+    txid          BLOB,    -- transaction id that contains this inscription
+    vout          INT,     -- output index in transaction
+    amount        BIGINT,  -- unspend amount in satoshi
+    address       BLOB,    -- p2tr address
+    PRIMARY KEY (txid, vout)
+) WITH CLUSTERING ORDER BY (vout ASC)
+    AND caching = {'enabled': 'true'}
+    AND comment = 'unspent TX outputs'
+    AND compaction = {'class': 'SizeTieredCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 0;
+
+CREATE INDEX utxo_address ON utxo (address);

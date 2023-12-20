@@ -20,6 +20,7 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
     Router::new()
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
+        .route("/best/utxo/list", routing::get(api::UtxoAPI::list))
         .nest(
             "/v1/name",
             Router::new()

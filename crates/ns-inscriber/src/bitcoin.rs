@@ -269,7 +269,6 @@ pub fn decode_hex<T: Decodable>(hex: &str) -> anyhow::Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dotenvy::dotenv;
 
     #[test]
     fn decode_hex_works() {
@@ -290,7 +289,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     #[ignore]
     async fn rpc_works() {
-        dotenv().expect(".env file not found");
+        dotenvy::from_filename("sample.env").expect(".env file not found");
 
         let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
         let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
