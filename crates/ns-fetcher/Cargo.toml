@@ -1,0 +1,37 @@
+[package]
+name = "ns-fetcher"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.64"
+description = "Fetch and validate inscriptions from ns-indexer service"
+publish = true
+repository = "https://github.com/ldclabs/ns-rs/tree/main/crates/ns-fetcher"
+license = "CC0-1.0"
+
+[lib]
+
+[dependencies]
+ns-protocol = { path = "../ns-protocol" }
+anyhow = { workspace = true }
+bytes = { workspace = true }
+base64 = { workspace = true }
+ciborium = { workspace = true }
+ciborium-io = { workspace = true }
+serde = { workspace = true }
+tokio = { workspace = true }
+futures = "0.3"
+reqwest = { version = "0.11", features = [
+  "rustls-tls",
+  "rustls-tls-webpki-roots",
+  "json",
+  "gzip",
+  "trust-dns",
+], default-features = false }
+hex = "0.4"
+bloomfilter = "1"
+async-stream = "0.3"
+futures-core = "0.3"
+futures-util = "0.3"
+
+[dev-dependencies]
+hex-literal = "0.4"

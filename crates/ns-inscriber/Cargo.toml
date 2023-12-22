@@ -1,11 +1,11 @@
 [package]
 name = "ns-inscriber"
-version = "0.2.0"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.64"
 description = "Name & Service Protocol inscriber service in Rust"
-publish = false
-repository = "https://github.com/ldclabs/ns-rs/crates/ns-inscriber"
+publish = true
+repository = "https://github.com/ldclabs/ns-rs/tree/main/crates/ns-inscriber"
 license = "CC0-1.0"
 
 [lib]

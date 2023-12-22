@@ -32,7 +32,7 @@ pub struct ScyllaDB {
 impl ScyllaDB {
     pub async fn new(cfg: &ScyllaDBOptions) -> anyhow::Result<Self> {
         let handle = ExecutionProfile::builder()
-            .consistency(Consistency::One)
+            .consistency(Consistency::Quorum)
             .serial_consistency(Some(SerialConsistency::Serial))
             .request_timeout(Some(Duration::from_secs(5)))
             .build()
@@ -189,8 +189,10 @@ mod tests {
         dotenvy::from_filename("sample.env").expect(".env file not found");
         let db = get_db().await;
 
+        let schema = std::include_str!("../../cql/keyspace.cql");
+        exec_cqls(db, schema).await.unwrap();
+
         let schema = std::include_str!("../../cql/schema.cql");
-        println!("schema: {}", schema);
         exec_cqls(db, schema).await.unwrap();
     }
 }
