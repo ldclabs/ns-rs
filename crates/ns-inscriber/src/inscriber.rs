@@ -563,7 +563,10 @@ mod tests {
     use serde_json::to_value;
 
     use ns_indexer::envelope::Envelope;
-    use ns_protocol::ns::{Operation, PublicKeyParams, Service, ThresholdLevel, Value};
+    use ns_protocol::{
+        ed25519,
+        ns::{Operation, PublicKeyParams, Service, ThresholdLevel, Value},
+    };
 
     fn get_name(name: &str) -> Name {
         let secret_key = hex!("7ef3811aabb916dc2f646ef1a371b90adec91bc07992cd4d44c156c42fc1b300");
@@ -573,6 +576,9 @@ mod tests {
             threshold: Some(1),
             kind: None,
         };
+
+        let signer = ed25519::SigningKey::try_from(&secret_key).unwrap();
+        let signers = vec![signer];
 
         let mut name = Name {
             name: name.to_string(),
@@ -587,7 +593,7 @@ mod tests {
             },
             signatures: vec![],
         };
-        name.sign(&params, ThresholdLevel::Default, &[secret_key.to_vec()])
+        name.sign(&params, ThresholdLevel::Default, &signers)
             .unwrap();
         assert!(name.validate().is_ok());
         name

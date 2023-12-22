@@ -6,9 +6,9 @@ use std::{borrow::BorrowMut, fmt::Debug};
 use crate::ns::{Error, Name, PublicKeyParams, Service, ThresholdLevel, Value};
 
 // After the silence period exceeds 365 days, the name is invalid, the application validation signature should be invalid, and the original registrant can activate the name with any update.
-pub const NAME_SILENT_SECONDS: u64 = 60 * 60 * 24 * 365;
+pub const NAME_STALE_SECONDS: u64 = 60 * 60 * 24 * 365;
 // After the silence period exceeds 365 + 180 days, others are allowed to re-register the name, if no one registers, the original registrant can activate the name with any update
-pub const NAME_EXPIRE_SECONDS: u64 = NAME_SILENT_SECONDS + 60 * 60 * 24 * 180;
+pub const NAME_EXPIRE_SECONDS: u64 = NAME_STALE_SECONDS + 60 * 60 * 24 * 180;
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
 pub struct NameState {
@@ -34,6 +34,10 @@ impl NameState {
 
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         hash_sha3(self)
+    }
+
+    pub fn is_stale(&self, block_time: u64) -> bool {
+        return self.block_time + NAME_STALE_SECONDS < block_time;
     }
 
     pub fn verify_the_next(
@@ -70,6 +74,16 @@ impl NameState {
 
         // handle the `0` service code (Name service)
         let mut next_state = self.clone();
+        if next.payload.operations.len() == 1 && next.payload.operations[0].subcode == 0 {
+            // This is the lightweight update operation
+            next.verify(&next_state.public_key_params(), ThresholdLevel::Default)?;
+            next_state.sequence = next.sequence;
+            next_state.block_height = block_height;
+            next_state.block_time = block_time;
+            next_state.next_public_keys = None;
+            return Ok(next_state);
+        }
+
         for op in &next.payload.operations {
             let public_key_params = PublicKeyParams::try_from(&op.params)?;
             public_key_params.validate()?;

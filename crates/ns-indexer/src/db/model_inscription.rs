@@ -2,7 +2,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use ns_protocol::index;
+use ns_protocol::state;
 
 use crate::db::{self, scylladb, scylladb::filter_single_row_err};
 
@@ -142,8 +142,8 @@ impl Inscription {
         }
     }
 
-    pub fn from_index(value: &index::Inscription) -> anyhow::Result<Self> {
-        let data = index::to_bytes(&value.data)?;
+    pub fn from_index(value: &state::Inscription) -> anyhow::Result<Self> {
+        let data = state::to_bytes(&value.data)?;
         Ok(Self {
             name: value.name.clone(),
             sequence: value.sequence as i64,
@@ -161,9 +161,9 @@ impl Inscription {
         })
     }
 
-    pub fn to_index(&self) -> anyhow::Result<index::Inscription> {
-        let data = index::from_bytes(&self.data)?;
-        Ok(index::Inscription {
+    pub fn to_index(&self) -> anyhow::Result<state::Inscription> {
+        let data = state::from_bytes(&self.data)?;
+        Ok(state::Inscription {
             name: self.name.clone(),
             sequence: self.sequence as u64,
             height: self.height as u64,
@@ -252,10 +252,10 @@ impl Inscription {
     // save inscriptions and states in a block to db
     pub async fn save_checkpoint(
         db: &scylladb::ScyllaDB,
-        name_states: &Vec<index::NameState>,
-        service_states: &Vec<index::ServiceState>,
-        protocol_states: &Vec<index::ServiceProtocol>,
-        inscriptions: &Vec<index::Inscription>,
+        name_states: &Vec<state::NameState>,
+        service_states: &Vec<state::ServiceState>,
+        protocol_states: &Vec<state::ServiceProtocol>,
+        inscriptions: &Vec<state::Inscription>,
     ) -> anyhow::Result<()> {
         let mut statements: Vec<&str> = Vec::with_capacity(1024);
         let mut values: Vec<Vec<CqlValue>> = Vec::with_capacity(1024);
@@ -486,8 +486,8 @@ impl Inscription {
 }
 
 impl InvalidInscription {
-    pub fn from_index(value: &index::InvalidInscription) -> anyhow::Result<Self> {
-        let data = index::to_bytes(&value.data)?;
+    pub fn from_index(value: &state::InvalidInscription) -> anyhow::Result<Self> {
+        let data = state::to_bytes(&value.data)?;
         Ok(Self {
             name: value.name.clone(),
             block_height: value.block_height as i64,
@@ -498,9 +498,9 @@ impl InvalidInscription {
         })
     }
 
-    pub fn to_index(&self) -> anyhow::Result<index::InvalidInscription> {
-        let data = index::from_bytes(&self.data)?;
-        Ok(index::InvalidInscription {
+    pub fn to_index(&self) -> anyhow::Result<state::InvalidInscription> {
+        let data = state::from_bytes(&self.data)?;
+        Ok(state::InvalidInscription {
             name: self.name.clone(),
             block_height: self.block_height as u64,
             hash: self.hash.clone(),

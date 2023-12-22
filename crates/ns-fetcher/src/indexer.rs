@@ -4,8 +4,8 @@ use serde::{de::DeserializeOwned, Deserialize};
 use tokio::time::{sleep, Duration};
 
 use ns_protocol::{
-    index::{Inscription, NameState, ServiceState},
     ns::Value,
+    state::{Inscription, NameState, ServiceState},
 };
 
 static APP_USER_AGENT: &str = concat!(

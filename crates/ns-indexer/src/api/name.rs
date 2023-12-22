@@ -10,7 +10,7 @@ use axum_web::{
     erring::{HTTPError, SuccessResponse},
     object::PackObject,
 };
-use ns_protocol::index::NameState;
+use ns_protocol::state::NameState;
 
 use crate::api::{IndexerAPI, QueryName, QueryPubkey};
 use crate::db;

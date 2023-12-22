@@ -6,8 +6,8 @@ use std::{
 use tokio::sync::RwLock;
 
 use ns_protocol::{
-    index::{hash_sha3, Inscription, InvalidInscription, NameState, ServiceProtocol, ServiceState},
     ns::{Name, PublicKeyParams, ThresholdLevel},
+    state::{hash_sha3, Inscription, InvalidInscription, NameState, ServiceProtocol, ServiceState},
 };
 
 use crate::db::{

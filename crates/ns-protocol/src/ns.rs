@@ -1,8 +1,4 @@
 use ciborium_io::{Read, Write};
-use ed25519_dalek::{
-    Signature as Ed25519Signature, Signer as Ed25519Signer, SigningKey as Ed25519SigningKey,
-    VerifyingKey as Ed25519VerifyingKey,
-};
 use finl_unicode::categories::CharacterCategories;
 use serde::{de, ser, Deserialize, Serialize};
 use std::{convert::From, fmt::Debug};
@@ -11,6 +7,8 @@ pub use ciborium::{
     from_reader, into_writer, tag,
     value::{Error, Value},
 };
+
+use crate::ed25519::{self, Signer};
 
 pub type NSTag = tag::Required<Name, 53>;
 pub type NSTagRef<'a> = tag::Required<&'a Name, 53>;
@@ -50,6 +48,9 @@ impl core::default::Default for Operation {
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct Signature(pub Vec<u8>);
 
+// PublicKeyParams is Ed25519 Multisignatures with threshold,
+// every public key can be FROST (Flexible Round-Optimised Schnorr Threshold signatures)
+// see: https://github.com/ZcashFoundation/frost
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct PublicKeyParams {
     pub public_keys: Vec<Vec<u8>>,
@@ -70,13 +71,13 @@ impl PublicKeyParams {
     pub fn validate(&self) -> Result<(), Error> {
         if self.public_keys.is_empty() {
             return Err(Error::Custom(
-                "expected at least one public key".to_string(),
+                "PublicKeyParams: expected at least one public key".to_string(),
             ));
         }
         for pk in self.public_keys.iter() {
             if pk.len() != 32 {
                 return Err(Error::Custom(format!(
-                    "expected public key length 32, got {:?}",
+                    "PublicKeyParams: expected key length is 32, got {:?}",
                     pk.len()
                 )));
             }
@@ -84,12 +85,12 @@ impl PublicKeyParams {
         if let Some(threshold) = self.threshold {
             if threshold == 0 {
                 return Err(Error::Custom(
-                    "threshold must be greater than 0".to_string(),
+                    "PublicKeyParams: threshold must be greater than 0".to_string(),
                 ));
             }
             if threshold > self.public_keys.len() as u8 {
                 return Err(Error::Custom(format!(
-                    "threshold {} is greater than number of public keys {}",
+                    "PublicKeyParams: threshold {} is greater than number of public keys {}",
                     threshold,
                     self.public_keys.len()
                 )));
@@ -98,7 +99,7 @@ impl PublicKeyParams {
         if let Some(kind) = self.kind {
             if kind != 0 {
                 return Err(Error::Custom(format!(
-                    "unsupported public key kind {}",
+                    "PublicKeyParams: unsupported public key kind {}",
                     kind
                 )));
             }
@@ -107,8 +108,7 @@ impl PublicKeyParams {
         public_keys.dedup();
         if public_keys.len() != self.public_keys.len() {
             return Err(Error::Custom(format!(
-                "duplicate public_keys {:?}",
-                self.public_keys
+                "PublicKeyParams: duplicate public_keys",
             )));
         }
 
@@ -133,6 +133,7 @@ impl PublicKeyParams {
     }
 }
 
+// name should be valid utf-8 string, not empty, not longer than 64 bytes, and not contain any of the following characters: uppercase letters, punctuations, separators, marks, symbols, and other control characters, format characters, surrogates, unassigned characters and private use characters.
 // https://docs.rs/finl_unicode/latest/finl_unicode/categories/trait.CharacterCategories.html
 pub fn valid_name(name: &str) -> bool {
     let mut size = 0;
@@ -161,8 +162,8 @@ impl Name {
     where
         R::Error: core::fmt::Debug,
     {
-        let value: NSTag =
-            from_reader(r).map_err(|err| Error::Custom(format!("decode_from: {:?}", err)))?;
+        let value: NSTag = from_reader(r)
+            .map_err(|err| Error::Custom(format!("Name: decode_from error, {:?}", err)))?;
         Ok(value.0)
     }
 
@@ -171,20 +172,21 @@ impl Name {
         W::Error: core::fmt::Debug,
     {
         let v: NSTagRef = tag::Required(self);
-        into_writer(&v, w).map_err(|err| Error::Custom(format!("encode_to failed: {:?}", err)))?;
+        into_writer(&v, w)
+            .map_err(|err| Error::Custom(format!("Name: encode_to error, {:?}", err)))?;
         Ok(())
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, Error> {
         if !buf.starts_with(&NS_PREFIX) {
-            return Err(Error::Custom("invalid name bytes".to_string()));
+            return Err(Error::Custom("Name: invalid bytes".to_string()));
         }
 
         let name = Self::decode_from(buf)?;
         let data = name.to_bytes()?;
         if !buf.eq(&data) {
             return Err(Error::Custom(
-                "from_bytes: data not consumed entirely".to_string(),
+                "Name: data not consumed entirely".to_string(),
             ));
         }
         Ok(name)
@@ -212,12 +214,12 @@ impl Name {
     // validate the name is well-formed
     pub fn validate(&self) -> Result<(), Error> {
         if !valid_name(&self.name) {
-            return Err(Error::Custom(format!("invalid name {}", self.name)));
+            return Err(Error::Custom(format!("Name: invalid name {}", self.name)));
         }
 
         if self.sequence > i64::MAX as u64 {
             return Err(Error::Custom(format!(
-                "invalid sequence {}, expected less than {}",
+                "Name: invalid sequence {}, expected less than {}",
                 self.sequence,
                 i64::MAX
             )));
@@ -225,7 +227,7 @@ impl Name {
 
         if self.payload.code > i64::MAX as u64 {
             return Err(Error::Custom(format!(
-                "invalid payload code {}, expected less than {}",
+                "Name: invalid payload code {}, expected less than {}",
                 self.payload.code,
                 i64::MAX
             )));
@@ -233,21 +235,24 @@ impl Name {
 
         if let Some(approver) = &self.payload.approver {
             if !valid_name(approver) {
-                return Err(Error::Custom(format!("invalid approver {}", approver)));
+                return Err(Error::Custom(format!(
+                    "Name: invalid approver {}",
+                    approver
+                )));
             }
         }
 
         if self.payload.operations.is_empty() {
-            return Err(Error::Custom("missing operations".to_string()));
+            return Err(Error::Custom("Name: missing operations".to_string()));
         }
 
         if self.signatures.is_empty() {
-            return Err(Error::Custom("missing signatures".to_string()));
+            return Err(Error::Custom("Name: missing signatures".to_string()));
         }
         for sig in self.signatures.iter() {
             if sig.0.len() != 64 {
                 return Err(Error::Custom(format!(
-                    "expected signature length 64, got {:?}",
+                    "Name: expected signature length is 64, got {:?}",
                     sig.0.len()
                 )));
             }
@@ -256,10 +261,7 @@ impl Name {
         let mut signatures = self.signatures.clone();
         signatures.dedup();
         if signatures.len() != self.signatures.len() {
-            return Err(Error::Custom(format!(
-                "duplicate signatures {:?}",
-                self.signatures
-            )));
+            return Err(Error::Custom(format!("Name: duplicate signatures",)));
         }
         Ok(())
     }
@@ -269,7 +271,7 @@ impl Name {
         let threshold = params.verifying_threshold(level);
         if threshold == 0 {
             return Err(Error::Custom(
-                "threshold must be greater than 0".to_string(),
+                "Name: threshold must be greater than 0".to_string(),
             ));
         }
 
@@ -277,10 +279,10 @@ impl Name {
         let mut keys = params.public_keys.iter();
         let mut count = 0;
         for sig in self.signatures.iter() {
-            let sig = Ed25519Signature::from_slice(&sig.0)
+            let sig = ed25519::Signature::from_slice(&sig.0)
                 .map_err(|err| Error::Custom(err.to_string()))?;
             for key in keys.by_ref() {
-                let verifying_key = Ed25519VerifyingKey::try_from(key.as_slice())
+                let verifying_key = ed25519::VerifyingKey::try_from(key.as_slice())
                     .map_err(|err| Error::Custom(err.to_string()))?;
                 if verifying_key.verify_strict(&data, &sig).is_ok() {
                     count += 1;
@@ -294,7 +296,7 @@ impl Name {
         }
 
         Err(Error::Custom(format!(
-            "verify failed, expected {} signatures, got {}",
+            "Name: verify failed, expected {} signatures, got {}",
             threshold, count
         )))
     }
@@ -303,26 +305,20 @@ impl Name {
         &mut self,
         params: &PublicKeyParams,
         level: ThresholdLevel,
-        secret_keys: &[Vec<u8>],
+        signers: &[ed25519::SigningKey],
     ) -> Result<(), Error> {
         let threshold = params.verifying_threshold(level);
         if threshold == 0 {
             return Err(Error::Custom(
-                "threshold must be greater than 0".to_string(),
+                "Name: threshold must be greater than 0".to_string(),
             ));
         }
 
         let data = self.to_sign_bytes()?;
-        let signing_keys = secret_keys
-            .iter()
-            .map(|key| Ed25519SigningKey::try_from(key.as_slice()))
-            .collect::<Result<Vec<Ed25519SigningKey>, ed25519_dalek::ed25519::Error>>()
-            .map_err(|err| Error::Custom(err.to_string()))?;
-
         self.signatures = Vec::with_capacity(threshold as usize);
         // siging in order of public keys
         for pk in params.public_keys.iter() {
-            if let Some(signer) = signing_keys
+            if let Some(signer) = signers
                 .iter()
                 .find(|sk| sk.verifying_key().as_bytes().as_slice() == pk)
             {
@@ -330,10 +326,18 @@ impl Name {
                 self.signatures.push(sig);
             }
         }
+        if self.signatures.len() != threshold as usize {
+            return Err(Error::Custom(format!(
+                "Name: expected {} signatures, got {}",
+                threshold,
+                self.signatures.len()
+            )));
+        }
+
         Ok(())
     }
 
-    pub fn sign_with(&mut self, signer: &Ed25519SigningKey) -> Result<(), Error> {
+    pub fn sign_with(&mut self, signer: &ed25519::SigningKey) -> Result<(), Error> {
         let data = self.to_sign_bytes()?;
         let sig = Signature(signer.sign(&data).to_bytes().to_vec());
         self.signatures.push(sig);
@@ -407,7 +411,7 @@ impl TryFrom<&Value> for Signature {
             Value::Bytes(bytes) => {
                 if bytes.len() != 64 {
                     Err(Error::Custom(format!(
-                        "expected value length 64, got {:?}",
+                        "Signature: expected value length is 64, got {:?}",
                         bytes.len()
                     )))
                 } else {
@@ -417,7 +421,7 @@ impl TryFrom<&Value> for Signature {
                 }
             }
             _ => Err(Error::Custom(format!(
-                "expected bytes, got {}",
+                "Signature: expected bytes, got {}",
                 kind_of_value(value)
             ))),
         }
@@ -431,7 +435,7 @@ impl TryFrom<&Value> for Operation {
             Value::Array(arr) => {
                 if arr.len() != 2 {
                     return Err(Error::Custom(format!(
-                        "expected array of length 2, got {:?}",
+                        "Operation: expected array of length is 2, got {:?}",
                         arr.len()
                     )));
                 }
@@ -441,17 +445,19 @@ impl TryFrom<&Value> for Operation {
                         .as_integer()
                         .ok_or_else(|| {
                             Error::Custom(format!(
-                                "expected integer, got {}",
+                                "Operation: expected integer, got {}",
                                 kind_of_value(&arr[0])
                             ))
                         })?
                         .try_into()
-                        .map_err(|err| Error::Custom(format!("expected u32, error: {:?}", err)))?,
+                        .map_err(|err| {
+                            Error::Custom(format!("Operation: expected u32, error, {:?}", err))
+                        })?,
                     params: arr[1].clone(),
                 })
             }
             _ => Err(Error::Custom(format!(
-                "expected array, got {}",
+                "Operation: expected array, got {}",
                 kind_of_value(value)
             ))),
         }
@@ -462,7 +468,10 @@ impl TryFrom<&Value> for Service {
     type Error = Error;
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         let arr = value.as_array().ok_or_else(|| {
-            Error::Custom(format!("expected array, got {}", kind_of_value(value)))
+            Error::Custom(format!(
+                "Service: expected array, got {}",
+                kind_of_value(value)
+            ))
         })?;
         match arr.len() {
             v if v == 2 || v == 3 => {
@@ -471,16 +480,21 @@ impl TryFrom<&Value> for Service {
                         .as_integer()
                         .ok_or_else(|| {
                             Error::Custom(format!(
-                                "expected integer, got {}",
+                                "Service: expected integer, got {}",
                                 kind_of_value(&arr[0])
                             ))
                         })?
                         .try_into()
-                        .map_err(|err| Error::Custom(format!("expected u32, error: {:?}", err)))?,
+                        .map_err(|err| {
+                            Error::Custom(format!("Service: expected u32, error: {:?}", err))
+                        })?,
                     operations: arr[1]
                         .as_array()
                         .ok_or_else(|| {
-                            Error::Custom(format!("expected array, got {}", kind_of_value(&arr[1])))
+                            Error::Custom(format!(
+                                "Service: expected array, got {}",
+                                kind_of_value(&arr[1])
+                            ))
                         })?
                         .iter()
                         .map(Operation::try_from)
@@ -489,14 +503,17 @@ impl TryFrom<&Value> for Service {
                 };
                 if v == 3 {
                     let approver = arr[2].as_text().ok_or_else(|| {
-                        Error::Custom(format!("expected text, got {}", kind_of_value(&arr[2])))
+                        Error::Custom(format!(
+                            "Service: expected text, got {}",
+                            kind_of_value(&arr[2])
+                        ))
                     })?;
                     srv.approver = Some(approver.to_string());
                 }
                 Ok(srv)
             }
             v => Err(Error::Custom(format!(
-                "expected array of length 2 or 3, got {:?}",
+                "Service: expected array of length 2 or 3, got {}",
                 v
             ))),
         }
@@ -507,7 +524,10 @@ impl TryFrom<&Value> for PublicKeyParams {
     type Error = Error;
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         let arr = value.as_array().ok_or_else(|| {
-            Error::Custom(format!("expected array, got {}", kind_of_value(value)))
+            Error::Custom(format!(
+                "PublicKeyParams: expected array, got {}",
+                kind_of_value(value)
+            ))
         })?;
         match arr.len() {
             v if (1..=3).contains(&v) => {
@@ -515,12 +535,18 @@ impl TryFrom<&Value> for PublicKeyParams {
                     public_keys: arr[0]
                         .as_array()
                         .ok_or_else(|| {
-                            Error::Custom(format!("expected array, got {}", kind_of_value(&arr[0])))
+                            Error::Custom(format!(
+                                "PublicKeyParams: expected array, got {}",
+                                kind_of_value(&arr[0])
+                            ))
                         })?
                         .iter()
                         .map(|pk| {
                             pk.as_bytes().map(|v| v.to_owned()).ok_or_else(|| {
-                                Error::Custom(format!("expected bytes, got {}", kind_of_value(pk)))
+                                Error::Custom(format!(
+                                    "PublicKeyParams: expected bytes, got {}",
+                                    kind_of_value(pk)
+                                ))
                             })
                         })
                         .collect::<Result<Vec<Vec<u8>>, Error>>()?,
@@ -532,12 +558,14 @@ impl TryFrom<&Value> for PublicKeyParams {
                         .as_integer()
                         .ok_or_else(|| {
                             Error::Custom(format!(
-                                "expected integer, got {}",
+                                "PublicKeyParams: expected integer, got {}",
                                 kind_of_value(&arr[1])
                             ))
                         })?
                         .try_into()
-                        .map_err(|err| Error::Custom(format!("expected u8, error: {:?}", err)))?;
+                        .map_err(|err| {
+                            Error::Custom(format!("PublicKeyParams: expected u8, error: {:?}", err))
+                        })?;
                     params.threshold = Some(threshold);
                 }
 
@@ -546,18 +574,20 @@ impl TryFrom<&Value> for PublicKeyParams {
                         .as_integer()
                         .ok_or_else(|| {
                             Error::Custom(format!(
-                                "expected integer, got {}",
+                                "PublicKeyParams: expected integer, got {}",
                                 kind_of_value(&arr[2])
                             ))
                         })?
                         .try_into()
-                        .map_err(|err| Error::Custom(format!("expected u8, error: {:?}", err)))?;
+                        .map_err(|err| {
+                            Error::Custom(format!("PublicKeyParams: expected u8, error: {:?}", err))
+                        })?;
                     params.kind = Some(kind);
                 }
                 Ok(params)
             }
             v => Err(Error::Custom(format!(
-                "expected array of length [1, 3], got {:?}",
+                "PublicKeyParams: expected array of length [1, 3], got {}",
                 v
             ))),
         }
@@ -568,35 +598,49 @@ impl TryFrom<&Value> for Name {
     type Error = Error;
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         let arr = value.as_array().ok_or_else(|| {
-            Error::Custom(format!("expected array, got {}", kind_of_value(value)))
+            Error::Custom(format!(
+                "Name: expected array, got {}",
+                kind_of_value(value)
+            ))
         })?;
         match arr.len() {
             4 => Ok(Name {
                 name: arr[0]
                     .as_text()
                     .ok_or_else(|| {
-                        Error::Custom(format!("expected text, got {}", kind_of_value(&arr[0])))
+                        Error::Custom(format!(
+                            "Name: expected text, got {}",
+                            kind_of_value(&arr[0])
+                        ))
                     })?
                     .to_string(),
                 sequence: arr[1]
                     .as_integer()
                     .ok_or_else(|| {
-                        Error::Custom(format!("expected integer, got {}", kind_of_value(&arr[1])))
+                        Error::Custom(format!(
+                            "Name: expected integer, got {}",
+                            kind_of_value(&arr[1])
+                        ))
                     })?
                     .try_into()
-                    .map_err(|err| Error::Custom(format!("expected u64, error: {:?}", err)))?,
+                    .map_err(|err| {
+                        Error::Custom(format!("Name: expected u64, error: {:?}", err))
+                    })?,
                 payload: Service::try_from(&arr[2])?,
                 signatures: arr[3]
                     .as_array()
                     .ok_or_else(|| {
-                        Error::Custom(format!("expected array, got {}", kind_of_value(&arr[3])))
+                        Error::Custom(format!(
+                            "Name: expected array, got {}",
+                            kind_of_value(&arr[3])
+                        ))
                     })?
                     .iter()
                     .map(Signature::try_from)
                     .collect::<Result<Vec<Signature>, Self::Error>>()?,
             }),
             _ => Err(Error::Custom(format!(
-                "expected array of length 4, got {:?}",
+                "Name: expected array of length 4, got {}",
                 arr.len()
             ))),
         }
@@ -764,6 +808,7 @@ mod tests {
             threshold: Some(1),
             kind: None,
         };
+        let signer = ed25519::SigningKey::try_from(&secret_key).unwrap();
         assert!(params.validate().is_ok());
 
         let mut name = Name {
@@ -780,7 +825,7 @@ mod tests {
             signatures: vec![],
         };
         assert!(name.validate().is_err());
-        name.sign(&params, ThresholdLevel::Default, &[secret_key.to_vec()])
+        name.sign(&params, ThresholdLevel::Default, &[signer])
             .unwrap();
         assert!(name.validate().is_ok());
         assert!(name.verify(&params, ThresholdLevel::Single).is_ok());

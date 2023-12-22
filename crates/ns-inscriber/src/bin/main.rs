@@ -449,6 +449,7 @@ async fn main() -> anyhow::Result<()> {
                 kind: None,
             };
 
+            let signers = vec![signing_key];
             let mut ns: Vec<Name> = Vec::with_capacity(names.len());
             for name in &names {
                 let mut n = Name {
@@ -464,11 +465,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                     signatures: vec![],
                 };
-                n.sign(
-                    &params,
-                    ThresholdLevel::All,
-                    &[signing_key.as_bytes().to_vec()],
-                )?;
+                n.sign(&params, ThresholdLevel::All, &signers)?;
                 n.validate()?;
                 ns.push(n);
             }
@@ -521,6 +518,7 @@ async fn main() -> anyhow::Result<()> {
                 kind: None,
             };
 
+            let signers = vec![signing_key];
             let mut ns: Vec<Name> = Vec::with_capacity(names.len());
             for name in &names {
                 let mut n = Name {
@@ -536,11 +534,7 @@ async fn main() -> anyhow::Result<()> {
                     },
                     signatures: vec![],
                 };
-                n.sign(
-                    &params,
-                    ThresholdLevel::All,
-                    &[signing_key.as_bytes().to_vec()],
-                )?;
+                n.sign(&params, ThresholdLevel::All, &signers)?;
                 n.validate()?;
                 ns.push(n);
             }

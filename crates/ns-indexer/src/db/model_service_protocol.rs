@@ -2,7 +2,7 @@ use axum_web::erring::HTTPError;
 use scylla_orm::{ColumnsMap, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 
-use ns_protocol::index;
+use ns_protocol::state;
 
 use crate::db::scylladb;
 
@@ -26,8 +26,8 @@ impl ServiceProtocol {
         }
     }
 
-    pub fn from_index(value: &index::ServiceProtocol) -> anyhow::Result<Self> {
-        let protocol = index::to_bytes(&value.protocol)?;
+    pub fn from_index(value: &state::ServiceProtocol) -> anyhow::Result<Self> {
+        let protocol = state::to_bytes(&value.protocol)?;
         Ok(Self {
             code: value.code as i64,
             version: value.version as i32,
@@ -38,9 +38,9 @@ impl ServiceProtocol {
         })
     }
 
-    pub fn to_index(&self) -> anyhow::Result<index::ServiceProtocol> {
-        let protocol = index::from_bytes(&self.protocol)?;
-        Ok(index::ServiceProtocol {
+    pub fn to_index(&self) -> anyhow::Result<state::ServiceProtocol> {
+        let protocol = state::from_bytes(&self.protocol)?;
+        Ok(state::ServiceProtocol {
             code: self.code as u64,
             version: self.version as u16,
             protocol,

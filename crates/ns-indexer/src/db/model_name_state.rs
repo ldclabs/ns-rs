@@ -3,7 +3,7 @@ use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use scylla_orm_macros::CqlOrm;
 use std::collections::{BTreeMap, HashSet};
 
-use ns_protocol::index;
+use ns_protocol::state;
 
 use crate::db::scylladb;
 
@@ -45,7 +45,7 @@ impl NameState {
         }
     }
 
-    pub fn from_index(value: &index::NameState) -> anyhow::Result<Self> {
+    pub fn from_index(value: &state::NameState) -> anyhow::Result<Self> {
         Ok(Self {
             name: value.name.clone(),
             sequence: value.sequence as i64,
@@ -59,8 +59,8 @@ impl NameState {
         })
     }
 
-    pub fn to_index(&self) -> anyhow::Result<index::NameState> {
-        Ok(index::NameState {
+    pub fn to_index(&self) -> anyhow::Result<state::NameState> {
+        Ok(state::NameState {
             name: self.name.clone(),
             sequence: self.sequence as u64,
             block_height: self.block_height as u64,

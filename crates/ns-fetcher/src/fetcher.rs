@@ -2,7 +2,7 @@ use async_stream::try_stream;
 use bloomfilter::Bloom;
 use futures_core::stream::Stream;
 
-use ns_protocol::index::{Inscription, NameState, ServiceState};
+use ns_protocol::state::{Inscription, NameState, ServiceState};
 
 use crate::indexer::Client;
 

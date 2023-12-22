@@ -78,7 +78,10 @@ mod tests {
     use bitcoin::blockdata::script::{Builder, PushBytesBuf};
     use ciborium::Value;
     use hex_literal::hex;
-    use ns_protocol::ns::{Operation, PublicKeyParams, Service, ThresholdLevel};
+    use ns_protocol::{
+        ed25519,
+        ns::{Operation, PublicKeyParams, Service, ThresholdLevel},
+    };
 
     #[test]
     fn names_from_witness() {
@@ -89,6 +92,8 @@ mod tests {
             threshold: Some(1),
             kind: None,
         };
+        let signer = ed25519::SigningKey::try_from(&secret_key).unwrap();
+        let signers = vec![signer];
 
         let mut name1 = Name {
             name: "a".to_string(),
@@ -104,7 +109,7 @@ mod tests {
             signatures: vec![],
         };
         name1
-            .sign(&params, ThresholdLevel::Default, &[secret_key.to_vec()])
+            .sign(&params, ThresholdLevel::Default, &signers)
             .unwrap();
         assert!(name1.validate().is_ok());
 
@@ -122,7 +127,7 @@ mod tests {
             signatures: vec![],
         };
         name2
-            .sign(&params, ThresholdLevel::Default, &[secret_key.to_vec()])
+            .sign(&params, ThresholdLevel::Default, &signers)
             .unwrap();
         assert!(name2.validate().is_ok());
 
