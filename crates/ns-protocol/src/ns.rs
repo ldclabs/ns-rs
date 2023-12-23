@@ -107,9 +107,9 @@ impl PublicKeyParams {
         let mut public_keys = self.public_keys.clone();
         public_keys.dedup();
         if public_keys.len() != self.public_keys.len() {
-            return Err(Error::Custom(format!(
-                "PublicKeyParams: duplicate public_keys",
-            )));
+            return Err(Error::Custom(
+                "PublicKeyParams: duplicate public_keys".to_string(),
+            ));
         }
 
         Ok(())
@@ -261,7 +261,7 @@ impl Name {
         let mut signatures = self.signatures.clone();
         signatures.dedup();
         if signatures.len() != self.signatures.len() {
-            return Err(Error::Custom(format!("Name: duplicate signatures",)));
+            return Err(Error::Custom("Name: duplicate signatures".to_string()));
         }
         Ok(())
     }
@@ -276,15 +276,19 @@ impl Name {
         }
 
         let data = self.to_sign_bytes()?;
-        let mut keys = params.public_keys.iter();
+        let mut keys: Vec<ed25519::VerifyingKey> = Vec::with_capacity(params.public_keys.len());
+        for pk in &params.public_keys {
+            let key = ed25519::VerifyingKey::try_from(pk.as_slice())
+                .map_err(|err| Error::Custom(err.to_string()))?;
+            keys.push(key);
+        }
+
         let mut count = 0;
         for sig in self.signatures.iter() {
             let sig = ed25519::Signature::from_slice(&sig.0)
                 .map_err(|err| Error::Custom(err.to_string()))?;
-            for key in keys.by_ref() {
-                let verifying_key = ed25519::VerifyingKey::try_from(key.as_slice())
-                    .map_err(|err| Error::Custom(err.to_string()))?;
-                if verifying_key.verify_strict(&data, &sig).is_ok() {
+            for key in keys.iter() {
+                if key.verify_strict(&data, &sig).is_ok() {
                     count += 1;
                     if count >= threshold {
                         return Ok(());
@@ -324,8 +328,12 @@ impl Name {
             {
                 let sig = Signature(signer.sign(&data).to_bytes().to_vec());
                 self.signatures.push(sig);
+                if self.signatures.len() == threshold as usize {
+                    break;
+                }
             }
         }
+
         if self.signatures.len() != threshold as usize {
             return Err(Error::Custom(format!(
                 "Name: expected {} signatures, got {}",
@@ -742,6 +750,13 @@ fn kind_of_value(v: &Value) -> String {
 mod tests {
     use super::*;
     use hex_literal::hex;
+    use rand_core::{OsRng, RngCore};
+
+    fn secret_key() -> [u8; 32] {
+        let mut data = [0u8; 32];
+        OsRng.fill_bytes(&mut data);
+        data
+    }
 
     #[test]
     fn valid_name_works() {
@@ -852,5 +867,107 @@ mod tests {
         buf.extend_from_slice(&data);
         buf.push(0x80);
         assert!(Name::from_bytes(&buf[..]).is_err());
+    }
+
+    #[test]
+    fn name_sign_verify() {
+        let s1 = ed25519::SigningKey::from_bytes(&secret_key());
+        let s2 = ed25519::SigningKey::from_bytes(&secret_key());
+        let s3 = ed25519::SigningKey::from_bytes(&secret_key());
+        let s4 = ed25519::SigningKey::from_bytes(&secret_key());
+        let mut signers = vec![s1.clone(), s2.clone(), s3.clone(), s4.clone()];
+
+        let params = PublicKeyParams {
+            public_keys: vec![
+                s1.verifying_key().as_bytes().to_vec(),
+                s2.verifying_key().as_bytes().to_vec(),
+                s3.verifying_key().as_bytes().to_vec(),
+                s4.verifying_key().as_bytes().to_vec(),
+            ],
+            threshold: Some(2),
+            kind: None,
+        };
+
+        let mut name = Name {
+            name: "道".to_string(),
+            sequence: 0,
+            payload: Service {
+                code: 0,
+                operations: vec![Operation {
+                    subcode: 1,
+                    params: Value::from(&params),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        assert!(name.validate().is_err());
+        name.sign(&params, ThresholdLevel::Single, &signers)
+            .unwrap();
+        assert!(name.validate().is_ok());
+        assert_eq!(1, name.signatures.len());
+        assert!(name.verify(&params, ThresholdLevel::Single).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Default).is_err());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_err());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        name.sign(&params, ThresholdLevel::Default, &signers)
+            .unwrap();
+        assert!(name.validate().is_ok());
+        assert_eq!(2, name.signatures.len());
+        assert!(name.verify(&params, ThresholdLevel::Single).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Default).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_err());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        name.sign(&params, ThresholdLevel::Strict, &signers)
+            .unwrap();
+        assert!(name.validate().is_ok());
+        assert_eq!(3, name.signatures.len());
+        assert!(name.verify(&params, ThresholdLevel::Single).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Default).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        name.sign(&params, ThresholdLevel::All, &signers).unwrap();
+        assert!(name.validate().is_ok());
+        assert_eq!(4, name.signatures.len());
+        assert!(name.verify(&params, ThresholdLevel::Single).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Default).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_ok());
+
+        assert!(
+            name.sign(&params, ThresholdLevel::All, &signers[1..])
+                .is_err(),
+            "signers less than ThresholdLevel::All"
+        );
+        assert!(name
+            .sign(&params, ThresholdLevel::Strict, &signers[1..])
+            .is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        signers[3] = s3.clone();
+        assert!(
+            name.sign(&params, ThresholdLevel::All, &signers).is_err(),
+            "depulicate signer"
+        );
+        assert!(name.sign(&params, ThresholdLevel::Strict, &signers).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        signers[3] = ed25519::SigningKey::from_bytes(&secret_key());
+        assert!(
+            name.sign(&params, ThresholdLevel::All, &signers).is_err(),
+            "stranger signer"
+        );
+        assert!(name.sign(&params, ThresholdLevel::Strict, &signers).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_err());
+
+        signers[3] = s4.clone();
+        assert!(name.sign(&params, ThresholdLevel::All, &signers).is_ok());
+        assert!(name.verify(&params, ThresholdLevel::All).is_ok());
     }
 }

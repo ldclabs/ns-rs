@@ -37,7 +37,7 @@ impl NameState {
     }
 
     pub fn is_stale(&self, block_time: u64) -> bool {
-        return self.block_time + NAME_STALE_SECONDS < block_time;
+        self.block_time + NAME_STALE_SECONDS < block_time
     }
 
     pub fn verify_the_next(
@@ -96,17 +96,17 @@ impl NameState {
                         sequence: next.sequence,
                         block_height,
                         block_time,
-                        threshold: self.threshold,
-                        key_kind: self.key_kind,
-                        public_keys: self.public_keys.clone(),
+                        threshold: next_state.threshold,
+                        key_kind: next_state.key_kind,
+                        public_keys: next_state.public_keys.clone(),
                         next_public_keys: Some(public_key_params.public_keys),
                     };
                 }
                 1 => {
                     // update public_keys
-                    let allow_update = (self.block_time + NAME_EXPIRE_SECONDS < block_time)
-                        || (self.next_public_keys.is_some()
-                            && self.next_public_keys.as_ref().unwrap()
+                    let allow_update = (next_state.block_time + NAME_EXPIRE_SECONDS < block_time)
+                        || (next_state.next_public_keys.is_some()
+                            && next_state.next_public_keys.as_ref().unwrap()
                                 == &public_key_params.public_keys);
 
                     if !allow_update {
@@ -295,4 +295,526 @@ pub fn hash_sha3<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
     into_writer(value, hasher.borrow_mut())
         .map_err(|err| Error::Custom(format!("hash_sha3: {:?}", err)))?;
     Ok(hasher.finalize().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand_core::{OsRng, RngCore};
+
+    use crate::{ed25519, ns};
+
+    fn secret_key() -> [u8; 32] {
+        let mut data = [0u8; 32];
+        OsRng.fill_bytes(&mut data);
+        data
+    }
+
+    #[test]
+    fn name_state_works() {
+        let s1 = ed25519::SigningKey::from_bytes(&secret_key());
+        let s2 = ed25519::SigningKey::from_bytes(&secret_key());
+        let s3 = ed25519::SigningKey::from_bytes(&secret_key());
+
+        let name_state = NameState {
+            name: "test".to_string(),
+            sequence: 0,
+            block_height: 1,
+            block_time: 1,
+            threshold: 1,
+            key_kind: 0,
+            public_keys: vec![s1.verifying_key().to_bytes().to_vec()],
+            next_public_keys: None,
+        };
+
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 1,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 1,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![
+                            s1.verifying_key().to_bytes().to_vec(),
+                            s2.verifying_key().to_bytes().to_vec(),
+                        ],
+                        threshold: None,
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone()],
+            )
+            .unwrap();
+        next_name.validate().unwrap();
+
+        assert!(
+            name_state.verify_the_next(3, 3, &next_name).is_err(),
+            "do not allow update"
+        );
+
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 1,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 2,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![
+                            s1.verifying_key().to_bytes().to_vec(),
+                            s2.verifying_key().to_bytes().to_vec(),
+                        ],
+                        threshold: None,
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone()],
+            )
+            .unwrap();
+        next_name.validate().unwrap();
+
+        let name_state = name_state.verify_the_next(3, 3, &next_name).unwrap();
+        assert_eq!(1, name_state.sequence);
+        assert_eq!(3, name_state.block_height);
+        assert_eq!(3, name_state.block_time);
+        assert_eq!(1, name_state.threshold);
+        assert_eq!(0, name_state.key_kind);
+        assert_eq!(
+            vec![s1.verifying_key().to_bytes().to_vec()],
+            name_state.public_keys
+        );
+        assert_eq!(
+            Some(vec![
+                s1.verifying_key().to_bytes().to_vec(),
+                s2.verifying_key().to_bytes().to_vec()
+            ]),
+            name_state.next_public_keys
+        );
+
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 2,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 1,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![
+                            s1.verifying_key().to_bytes().to_vec(),
+                            s2.verifying_key().to_bytes().to_vec(),
+                        ],
+                        threshold: None,
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone()],
+            )
+            .unwrap();
+        next_name.validate().unwrap();
+
+        assert!(
+            name_state.verify_the_next(5, 5, &next_name).is_err(),
+            "invalid signatures"
+        );
+
+        next_name
+            .sign(
+                &ns::PublicKeyParams {
+                    public_keys: vec![
+                        s1.verifying_key().to_bytes().to_vec(),
+                        s2.verifying_key().to_bytes().to_vec(),
+                    ],
+                    threshold: None,
+                    kind: None,
+                },
+                ns::ThresholdLevel::All,
+                &[s1.clone(), s2.clone()],
+            )
+            .unwrap();
+        next_name.validate().unwrap();
+
+        let name_state = name_state.verify_the_next(5, 5, &next_name).unwrap();
+        assert_eq!(2, name_state.sequence);
+        assert_eq!(5, name_state.block_height);
+        assert_eq!(5, name_state.block_time);
+        assert_eq!(2, name_state.threshold);
+        assert_eq!(0, name_state.key_kind);
+        assert_eq!(
+            vec![
+                s1.verifying_key().to_bytes().to_vec(),
+                s2.verifying_key().to_bytes().to_vec()
+            ],
+            name_state.public_keys
+        );
+        assert_eq!(None, name_state.next_public_keys);
+
+        // update public_keys in one call
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 3,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![
+                    ns::Operation {
+                        subcode: 2,
+                        params: ns::Value::from(&ns::PublicKeyParams {
+                            public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                            threshold: None,
+                            kind: None,
+                        }),
+                    },
+                    ns::Operation {
+                        subcode: 1,
+                        params: ns::Value::from(&ns::PublicKeyParams {
+                            public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                            threshold: None,
+                            kind: None,
+                        }),
+                    },
+                ],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone(), s2.clone()],
+            )
+            .unwrap();
+
+        next_name.validate().unwrap();
+        assert!(
+            name_state.verify_the_next(7, 7, &next_name).is_err(),
+            "invalid signatures"
+        );
+
+        next_name.sign_with(&s3).unwrap();
+        assert_eq!(3, next_name.signatures.len());
+        let name_state = name_state.verify_the_next(7, 7, &next_name).unwrap();
+        assert_eq!(3, name_state.sequence);
+        assert_eq!(7, name_state.block_height);
+        assert_eq!(7, name_state.block_time);
+        assert_eq!(1, name_state.threshold);
+        assert_eq!(0, name_state.key_kind);
+        assert_eq!(
+            vec![s3.verifying_key().to_bytes().to_vec()],
+            name_state.public_keys
+        );
+        assert_eq!(None, name_state.next_public_keys);
+
+        // update public_keys after NAME_EXPIRE_SECONDS
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 4,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 1,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![
+                            s2.verifying_key().to_bytes().to_vec(),
+                            s1.verifying_key().to_bytes().to_vec(),
+                        ],
+                        threshold: Some(1),
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+
+        next_name.sign_with(&s1).unwrap();
+        next_name.sign_with(&s2).unwrap();
+        next_name.validate().unwrap();
+
+        let name_state = name_state
+            .verify_the_next(8, 8 + NAME_EXPIRE_SECONDS, &next_name)
+            .unwrap();
+        assert_eq!(4, name_state.sequence);
+        assert_eq!(8, name_state.block_height);
+        assert_eq!(8 + NAME_EXPIRE_SECONDS, name_state.block_time);
+        assert_eq!(1, name_state.threshold);
+        assert_eq!(0, name_state.key_kind);
+        assert_eq!(
+            vec![
+                s2.verifying_key().to_bytes().to_vec(),
+                s1.verifying_key().to_bytes().to_vec()
+            ],
+            name_state.public_keys
+        );
+        assert_eq!(None, name_state.next_public_keys);
+
+        // the lightweight update operation
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 5,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    // this operation will be overwritten
+                    subcode: 2,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                        threshold: None,
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Strict,
+                &[s1.clone(), s2.clone()],
+            )
+            .unwrap();
+
+        next_name.validate().unwrap();
+        let name_state = name_state
+            .verify_the_next(name_state.block_height, name_state.block_time, &next_name)
+            .unwrap();
+        assert!(name_state.next_public_keys.is_some());
+
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 6,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 0,
+                    params: ns::Value::Null,
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone()],
+            )
+            .unwrap();
+
+        next_name.validate().unwrap();
+        let name_state = name_state
+            .verify_the_next(name_state.block_height, name_state.block_time, &next_name)
+            .unwrap();
+        assert_eq!(6, name_state.sequence);
+        assert_eq!(1, name_state.threshold);
+        assert_eq!(
+            vec![
+                s2.verifying_key().to_bytes().to_vec(),
+                s1.verifying_key().to_bytes().to_vec()
+            ],
+            name_state.public_keys
+        );
+        assert_eq!(None, name_state.next_public_keys);
+
+        // the other update operation
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 7,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    // this operation will be overwritten
+                    subcode: 2,
+                    params: ns::Value::from(&ns::PublicKeyParams {
+                        public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                        threshold: None,
+                        kind: None,
+                    }),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Strict,
+                &[s2.clone(), s1.clone()],
+            )
+            .unwrap();
+
+        next_name.validate().unwrap();
+        let name_state = name_state
+            .verify_the_next(name_state.block_height, name_state.block_time, &next_name)
+            .unwrap();
+        assert!(name_state.next_public_keys.is_some());
+
+        let mut next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 8,
+            payload: ns::Service {
+                code: 123,
+                operations: vec![ns::Operation {
+                    subcode: 0,
+                    params: ns::Value::Null,
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+        next_name
+            .sign(
+                &name_state.public_key_params(),
+                ns::ThresholdLevel::Default,
+                &[s1.clone()],
+            )
+            .unwrap();
+
+        next_name.validate().unwrap();
+        let name_state = name_state
+            .verify_the_next(name_state.block_height, name_state.block_time, &next_name)
+            .unwrap();
+        assert_eq!(8, name_state.sequence);
+        assert_eq!(1, name_state.threshold);
+        assert_eq!(
+            vec![
+                s2.verifying_key().to_bytes().to_vec(),
+                s1.verifying_key().to_bytes().to_vec()
+            ],
+            name_state.public_keys
+        );
+        assert_eq!(None, name_state.next_public_keys);
+    }
+
+    #[test]
+    fn service_state_works() {
+        let mut service_state = ServiceState {
+            name: "test".to_string(),
+            code: 0,
+            sequence: 0,
+            data: Vec::new(),
+        };
+        let next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 1,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 0,
+                    params: ns::Value::Null,
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+
+        service_state = service_state.verify_the_next(&next_name).unwrap();
+        assert_eq!(1, service_state.sequence);
+        assert_eq!(1, service_state.data.len());
+        assert_eq!(0, service_state.data[0].0);
+        assert_eq!(ns::Value::Null, service_state.data[0].1);
+
+        let next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 2,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 0,
+                    params: ns::Value::Text("hello".to_string()),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+
+        service_state = service_state.verify_the_next(&next_name).unwrap();
+        assert_eq!(2, service_state.sequence);
+        assert_eq!(1, service_state.data.len());
+        assert_eq!(0, service_state.data[0].0);
+        assert_eq!(
+            ns::Value::Text("hello".to_string()),
+            service_state.data[0].1
+        );
+
+        let next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 3,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 3,
+                    params: ns::Value::Null,
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+
+        service_state = service_state.verify_the_next(&next_name).unwrap();
+        assert_eq!(3, service_state.sequence);
+        assert_eq!(2, service_state.data.len());
+        assert_eq!(0, service_state.data[0].0);
+        assert_eq!(
+            ns::Value::Text("hello".to_string()),
+            service_state.data[0].1
+        );
+        assert_eq!(3, service_state.data[1].0);
+        assert_eq!(ns::Value::Null, service_state.data[1].1);
+
+        let next_name = ns::Name {
+            name: "test".to_string(),
+            sequence: 4,
+            payload: ns::Service {
+                code: 0,
+                operations: vec![ns::Operation {
+                    subcode: 2,
+                    params: ns::Value::Text("hello2".to_string()),
+                }],
+                approver: None,
+            },
+            signatures: vec![],
+        };
+
+        service_state = service_state.verify_the_next(&next_name).unwrap();
+        assert_eq!(4, service_state.sequence);
+        assert_eq!(3, service_state.data.len());
+        assert_eq!(0, service_state.data[0].0);
+        assert_eq!(
+            ns::Value::Text("hello".to_string()),
+            service_state.data[0].1
+        );
+        assert_eq!(2, service_state.data[1].0);
+        assert_eq!(
+            ns::Value::Text("hello2".to_string()),
+            service_state.data[1].1
+        );
+        assert_eq!(3, service_state.data[2].0);
+        assert_eq!(ns::Value::Null, service_state.data[2].1);
+    }
 }

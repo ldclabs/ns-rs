@@ -134,33 +134,43 @@ impl NameState {
         db: &scylladb::ScyllaDB,
         names: Vec<&String>,
     ) -> anyhow::Result<Vec<NameState>> {
-        let mut vals_name: Vec<&str> = Vec::with_capacity(names.len());
-        let mut params: Vec<CqlValue> = Vec::with_capacity(names.len());
-
-        for name in names {
-            vals_name.push("?");
-            params.push(name.to_cql());
-        }
-
         let fields = vec!["name".to_string(), "public_keys".to_string()];
-        let query = format!(
-            "SELECT {} FROM name_state WHERE name IN ({})",
-            fields.join(","),
-            vals_name.join(",")
-        );
-        let res = db.execute(query, params).await?;
 
-        let rows = res.rows.unwrap_or_default();
-        let mut res: Vec<NameState> = Vec::with_capacity(rows.len());
-        for r in rows {
-            let mut cols = ColumnsMap::with_capacity(2);
-            cols.fill(r, &fields)?;
-            let mut item = NameState::default();
-            item.fill(&cols);
-            res.push(item);
+        let mut output: Vec<NameState> = Vec::with_capacity(names.len());
+
+        let mut start = 0;
+        while start < names.len() {
+            let end = if start + 100 > names.len() {
+                names.len()
+            } else {
+                start + 100
+            };
+
+            let mut vals_name: Vec<&str> = Vec::with_capacity(end - start);
+            let mut params: Vec<CqlValue> = Vec::with_capacity(end - start);
+            for name in &names[start..end] {
+                vals_name.push("?");
+                params.push(name.to_cql());
+            }
+
+            let query = format!(
+                "SELECT {} FROM name_state WHERE name IN ({})",
+                fields.join(","),
+                vals_name.join(",")
+            );
+            let res = db.execute(query, params).await?;
+            let rows = res.rows.unwrap_or_default();
+            for r in rows {
+                let mut cols = ColumnsMap::with_capacity(2);
+                cols.fill(r, &fields)?;
+                let mut item = NameState::default();
+                item.fill(&cols);
+                output.push(item);
+            }
+            start = end;
         }
 
-        Ok(res)
+        Ok(output)
     }
 
     pub async fn batch_update_name_indexs(

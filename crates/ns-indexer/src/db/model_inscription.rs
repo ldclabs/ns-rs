@@ -396,7 +396,19 @@ impl Inscription {
             );
         }
 
-        let _ = db.batch(statements, values).await?;
+        let mut start = 0;
+        while start < statements.len() {
+            let end = if start + 1000 > statements.len() {
+                statements.len()
+            } else {
+                start + 1000
+            };
+
+            let _ = db
+                .batch(statements[start..end].to_vec(), &values[start..end])
+                .await?;
+            start = end;
+        }
         Ok(())
     }
 

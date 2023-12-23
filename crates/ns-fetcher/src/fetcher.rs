@@ -2,15 +2,20 @@ use async_stream::try_stream;
 use bloomfilter::Bloom;
 use futures_core::stream::Stream;
 
-use ns_protocol::state::{Inscription, NameState, ServiceState};
+use ns_protocol::state::{Inscription, NameState, ServiceProtocol, ServiceState};
 
 use crate::indexer::Client;
+
+pub type InscriptionState = (
+    Inscription,
+    Option<(NameState, ServiceState, Option<ServiceProtocol>)>,
+);
 
 // fetches all inscriptions and states from last accepted to bottom_height
 pub fn fetch_desc(
     cli: Client,
     bottom_height: u64,
-) -> impl Stream<Item = anyhow::Result<(Inscription, Option<(NameState, ServiceState)>)>> {
+) -> impl Stream<Item = anyhow::Result<InscriptionState>> {
     try_stream! {
         let last_accepted: Inscription = cli.get_last_accepted_inscription().await?;
         let name_state: NameState = cli.get_name_state(&last_accepted.name).await?;
@@ -21,7 +26,7 @@ pub fn fetch_desc(
         let mut head_inscription = last_accepted.clone();
 
         bloom.set(&head_inscription.name);
-        yield (last_accepted, Some((name_state, service_state)));
+        yield (last_accepted, Some((name_state, service_state, None)));
 
         loop {
             if head_height == 0 || head_height < bottom_height {
@@ -65,7 +70,7 @@ pub fn fetch_desc(
                 Err(anyhow::anyhow!("inscription({}): service_hash mismatch", inscription.height))?;
             }
 
-            yield (inscription, Some((name_state, service_state)));
+            yield (inscription, Some((name_state, service_state, None)));
         }
     }
 }
@@ -81,7 +86,7 @@ mod tests {
     #[ignore]
     async fn fetcher_works() {
         let endpoint = std::env::var("INDEXER_ENDPOINT").unwrap_or_default();
-        // let endpoint = "http://127.0.0.1::8080".to_string();
+        // let endpoint = "http://192.168.1.80:8080".to_string();
         if endpoint.is_empty() {
             return;
         }
@@ -95,7 +100,7 @@ mod tests {
         let (last_accepted, state) = s.next().await.unwrap().unwrap();
         assert!(last_accepted.height > 0);
         assert!(state.is_some());
-        let (name_state, service_state) = state.unwrap();
+        let (name_state, service_state, _) = state.unwrap();
         assert_eq!(last_accepted.name, name_state.name);
         assert_eq!(last_accepted.sequence, name_state.sequence);
         assert_eq!(last_accepted.name, service_state.name);
@@ -104,10 +109,13 @@ mod tests {
         assert_eq!(last_accepted.service_hash, service_state.hash().unwrap());
 
         let mut state_exists = false;
+        let mut head_ins = last_accepted.clone();
         while let Some(res) = s.next().await {
             let (ins, state) = res.unwrap();
             println!("got {}, {}, {}", ins.height, ins.name, ins.sequence);
-            if let Some((name_state, service_state)) = state {
+            assert_eq!(head_ins.previous_hash, ins.hash().unwrap());
+            head_ins = ins.clone();
+            if let Some((name_state, service_state, _)) = state {
                 assert_eq!(ins.name, name_state.name);
                 assert_eq!(ins.sequence, name_state.sequence);
                 assert_eq!(ins.name, service_state.name);
