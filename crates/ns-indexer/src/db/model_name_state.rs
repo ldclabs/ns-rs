@@ -1,6 +1,6 @@
-use axum_web::erring::HTTPError;
-use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
-use scylla_orm_macros::CqlOrm;
+use ns_axum_web::erring::HTTPError;
+use ns_scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
+use ns_scylla_orm_macros::CqlOrm;
 use std::collections::{BTreeMap, HashSet};
 
 use ns_protocol::state;

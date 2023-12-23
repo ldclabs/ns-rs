@@ -42,7 +42,7 @@ pub fn cql_orm(input: TokenStream) -> TokenStream {
                 ]
             }
 
-            pub fn fill(&mut self, cols: &scylla_orm::ColumnsMap) {
+            pub fn fill(&mut self, cols: &ColumnsMap) {
                 #(
                     if cols.has(#field_names_string1) {
                         self.#field_names0 = cols.get_as(#field_names_string2).unwrap_or_default();
@@ -50,8 +50,8 @@ pub fn cql_orm(input: TokenStream) -> TokenStream {
                 )*
             }
 
-            pub fn to(&self) -> scylla_orm::ColumnsMap {
-                let mut cols = scylla_orm::ColumnsMap::with_capacity(#fields_num);
+            pub fn to(&self) -> ColumnsMap {
+                let mut cols = ColumnsMap::with_capacity(#fields_num);
                 #(
                     cols.set_as(#field_names_string3, &self.#field_names1);
                 )*

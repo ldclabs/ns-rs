@@ -1,6 +1,6 @@
 use futures::{stream::StreamExt, Stream};
 use scylla::{
-    frame::value::{BatchValues, ValueList},
+    serialize::{batch::BatchValues, row::SerializeRow},
     statement::{Consistency, SerialConsistency},
     transport::{
         iterator::RowIterator,
@@ -62,7 +62,7 @@ impl ScyllaDB {
     pub async fn execute(
         &self,
         query: impl Into<Query>,
-        params: impl ValueList,
+        params: impl SerializeRow,
     ) -> anyhow::Result<QueryResult> {
         let res = self.session.execute(query, params).await?;
         Ok(res)
@@ -71,7 +71,7 @@ impl ScyllaDB {
     pub async fn execute_iter(
         &self,
         query: impl Into<Query>,
-        params: impl ValueList,
+        params: impl SerializeRow,
     ) -> anyhow::Result<Vec<Row>> {
         let mut rows_stream = self.session.execute_iter(query, params).await?;
 
@@ -86,7 +86,7 @@ impl ScyllaDB {
     pub async fn stream(
         &self,
         query: impl Into<Query>,
-        params: impl ValueList,
+        params: impl SerializeRow,
     ) -> anyhow::Result<RowIterator> {
         let stream = self.session.execute_iter(query, params).await?;
         Ok(stream)

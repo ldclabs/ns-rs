@@ -1,11 +1,11 @@
 [package]
-name = "axum-web"
+name = "ns-axum-web"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.64"
-description = ""
-publish = false
-repository = "https://github.com/ldclabs/ns-rs/crates/internal/axum-web"
+description = "axum web middlewares for ns-rs"
+publish = true
+repository = "https://github.com/ldclabs/ns-rs/tree/main/crates/ns-axum-web"
 license = "CC0-1.0"
 
 [lib]
@@ -25,6 +25,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 structured-logger = { workspace = true }
 tokio = { workspace = true }
-scylla = "0.10"
+scylla = "0.11"
 zstd = "0.12"
 validator = { version = "0.16", features = ["derive"] }

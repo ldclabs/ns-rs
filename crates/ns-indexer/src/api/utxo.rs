@@ -6,7 +6,7 @@ use bitcoin::{Address, AddressType};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use validator::Validate;
 
-use axum_web::{
+use ns_axum_web::{
     context::ReqContext,
     erring::{HTTPError, SuccessResponse},
     object::PackObject,

@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use validator::{Validate, ValidationError};
 
-use axum_web::erring::{HTTPError, SuccessResponse};
-use axum_web::object::PackObject;
+use ns_axum_web::erring::{HTTPError, SuccessResponse};
+use ns_axum_web::object::PackObject;
 use ns_protocol::ns;
 
 use crate::db::scylladb::ScyllaDB;

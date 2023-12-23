@@ -5,7 +5,7 @@ use axum::{
 use std::sync::Arc;
 use validator::Validate;
 
-use axum_web::{
+use ns_axum_web::{
     context::ReqContext,
     erring::{HTTPError, SuccessResponse},
     object::PackObject,

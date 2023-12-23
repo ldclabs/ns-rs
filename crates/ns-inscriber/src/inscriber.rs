@@ -59,17 +59,11 @@ impl Inscriber {
         fee_rate: Amount,
         secret: &SecretKey,
         unspent_txouts: &Vec<UnspentTxOut>,
-        inscription_keypair: Option<Keypair>, // safe to use one-time KeyPair
     ) -> anyhow::Result<Txid> {
         let keypair = Keypair::from_secret_key(&self.secp, secret);
 
         let (unspent_txout, unsigned_commit_tx, signed_reveal_tx) = self
-            .build_inscription_transactions(
-                names,
-                fee_rate,
-                unspent_txouts,
-                Some(inscription_keypair.unwrap_or(keypair)),
-            )
+            .build_inscription_transactions(names, fee_rate, unspent_txouts, Some(keypair))
             .await?;
 
         let mut signed_commit_tx = unsigned_commit_tx;
@@ -137,9 +131,13 @@ impl Inscriber {
         }
 
         let commit = self.bitcoin.send_transaction(&signed_commit_tx).await?;
-        let reveal = self.bitcoin.send_transaction(&signed_reveal_tx).await
-        .map_err(|err| anyhow::anyhow!("failed to send reveal transaction: {err}\ncommit tx {commit} will be recovered once mined"
-          ))?;
+        let reveal = self
+            .bitcoin
+            .send_transaction(&signed_reveal_tx)
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!("failed to send reveal transaction: {err}\ncommit tx: {commit}")
+            })?;
 
         Ok(reveal)
     }
@@ -704,7 +702,7 @@ mod tests {
         let names = vec![get_name("0")];
         let fee_rate = Amount::from_sat(20);
         let txid = inscriber
-            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs, None)
+            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs)
             .await
             .unwrap();
         println!("txid: {}", txid);
@@ -764,13 +762,7 @@ mod tests {
         assert_eq!("z", names[35].name);
 
         let txid = inscriber
-            .inscribe(
-                &names,
-                fee_rate,
-                &keypair.secret_key(),
-                &unspent_txs,
-                Some(keypair),
-            )
+            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs)
             .await
             .unwrap();
         println!("txid: {}", txid);

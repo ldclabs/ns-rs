@@ -6,8 +6,8 @@ use tower_http::{
     compression::{predicate::SizeAbove, CompressionLayer},
 };
 
-use axum_web::context;
-use axum_web::encoding;
+use ns_axum_web::context;
+use ns_axum_web::encoding;
 
 use crate::api;
 

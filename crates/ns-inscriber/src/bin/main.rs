@@ -567,7 +567,6 @@ async fn main() -> anyhow::Result<()> {
                         amount: txout.value,
                         script_pubkey: txout.script_pubkey.clone(),
                     }],
-                    None,
                 )
                 .await?;
 

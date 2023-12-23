@@ -1,7 +1,7 @@
 use std::vec;
 
-use scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
-use scylla_orm_macros::CqlOrm;
+use ns_scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
+use ns_scylla_orm_macros::CqlOrm;
 
 use crate::db::scylladb;
 use crate::utxo;

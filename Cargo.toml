@@ -11,8 +11,7 @@ license = "CC0-1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = ["crates/internal/*", "crates/ns-*"]
-# exclude = ["crates/internal"]
+members = ["crates/*"]
 
 [workspace.dependencies]
 anyhow = "1"
