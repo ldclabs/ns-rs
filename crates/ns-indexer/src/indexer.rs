@@ -7,7 +7,10 @@ use tokio::sync::RwLock;
 
 use ns_protocol::{
     ns::{Name, PublicKeyParams, ThresholdLevel},
-    state::{hash_sha3, Inscription, InvalidInscription, NameState, ServiceProtocol, ServiceState},
+    state::{
+        hash_sha3, Inscription, InvalidInscription, NameState, ServiceProtocol, ServiceState,
+        NAME_EXPIRE_SECONDS, NAME_STALE_SECONDS,
+    },
 };
 
 use crate::db::{
@@ -113,6 +116,7 @@ impl Indexer {
 
         for envelope in Envelope::from_transaction(&tx) {
             for name in envelope.payload {
+                let is_new_name = name.sequence == 0;
                 match self.index_name(block_height, block_time, &name).await {
                     Err(err) => {
                         if !name.name.is_empty() {
@@ -141,6 +145,7 @@ impl Indexer {
                             name: name.name.clone(),
                             sequence: name.sequence,
                             height: 0,
+                            name_height: 0,
                             previous_hash: vec![],
                             name_hash: name_state_hash,
                             service_hash: service_state_hash,
@@ -158,6 +163,11 @@ impl Indexer {
                             match best_inscriptions_state.back() {
                                 Some(prev_best_inscription) => {
                                     inscription.height = prev_best_inscription.height + 1;
+                                    inscription.name_height = if is_new_name {
+                                        prev_best_inscription.name_height + 1
+                                    } else {
+                                        prev_best_inscription.name_height
+                                    };
                                     inscription.previous_hash = prev_best_inscription
                                         .hash()
                                         .expect("hash_sha3(inscription) should not fail");
@@ -165,12 +175,19 @@ impl Indexer {
                                 None => match *self.state.last_accepted.read().await {
                                     Some(ref last_accepted_state) => {
                                         inscription.height = last_accepted_state.height + 1;
+                                        inscription.name_height = if is_new_name {
+                                            last_accepted_state.name_height + 1
+                                        } else {
+                                            last_accepted_state.name_height
+                                        };
                                         inscription.previous_hash = last_accepted_state
                                             .hash()
                                             .expect("hash_sha3(inscription) should not fail");
                                     }
                                     None => {
                                         // this is the first inscription
+                                        inscription.height = 1;
+                                        inscription.name_height = 1;
                                         inscription.previous_hash = [0u8; 32].to_vec();
                                     }
                                 },
@@ -340,6 +357,8 @@ impl Indexer {
             sequence: 0,
             block_height,
             block_time,
+            stale_time: block_time + NAME_STALE_SECONDS,
+            expire_time: block_time + NAME_EXPIRE_SECONDS,
             threshold: public_key_params
                 .threshold
                 .unwrap_or(public_key_params.public_keys.len() as u8),

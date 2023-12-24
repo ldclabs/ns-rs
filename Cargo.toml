@@ -16,20 +16,12 @@ members = ["crates/*"]
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.7", features = [
-  "http1",
-  "http2",
-  "json",
-  "macros",
-  "matched-path",
-  "tokio",
-  "query",
-], default-features = true }
 bytes = "1"
 base64 = "0.21"
 ciborium = "0.2"
 ciborium-io = "0.2"
 ed25519-dalek = "2"
+futures = "0.3"
 libflate = "1"
 log = "0.4"
 mime = "0.3"

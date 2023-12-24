@@ -1,6 +1,6 @@
 [package]
 name = "ns-inscriber"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.64"
 description = "Name & Service Protocol inscriber service in Rust"
@@ -15,8 +15,8 @@ name = "ns-inscriber"
 path = "src/bin/main.rs"
 
 [dependencies]
-ns-protocol = { path = "../ns-protocol", version = "0.4" }
-ns-indexer = { path = "../ns-indexer", version = "0.1" }
+ns-protocol = { path = "../ns-protocol", version = "0.5" }
+ns-indexer = { path = "../ns-indexer", version = "0.2" }
 anyhow = { workspace = true }
 bytes = { workspace = true }
 base64 = { workspace = true }
@@ -28,7 +28,7 @@ serde_json = { workspace = true }
 log = { workspace = true }
 structured-logger = { workspace = true }
 ed25519-dalek = { workspace = true }
-futures = "0.3"
+futures = { workspace = true }
 reqwest = { version = "0.11", features = [
   "rustls-tls",
   "rustls-tls-webpki-roots",

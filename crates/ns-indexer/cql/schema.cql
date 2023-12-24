@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS name_state (
     sequence         BIGINT,     -- name's latest sequence
     block_height     BIGINT,     -- latest update at block height
     block_time       BIGINT,     -- latest update at block time
+    stale_time       BIGINT,     -- stale time
+    expire_time      BIGINT,     -- expire time
     threshold        TINYINT,    -- verifing threshold
     key_kind         TINYINT,    -- int8, 0: Ed25519
     public_keys      LIST<BLOB>, -- public keys
@@ -70,6 +72,7 @@ CREATE TABLE IF NOT EXISTS inscription (
     name          TEXT,      -- unique name
     sequence      BIGINT,    -- name's updating sequence
     height        BIGINT,    -- inscription's global height
+    name_height   BIGINT,    -- global name's counter
     previous_hash BLOB,      -- previous inscription hash
     name_hash     BLOB,      -- current name state hash
     service_hash  BLOB,      -- current service state hash

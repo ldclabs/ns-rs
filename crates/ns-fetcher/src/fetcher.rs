@@ -11,7 +11,8 @@ pub type InscriptionState = (
     Option<(NameState, ServiceState, Option<ServiceProtocol>)>,
 );
 
-// fetches all inscriptions and states from last accepted to bottom_height
+// fetches all inscriptions and states from last accepted to bottom_height.
+// The lowest height is 1 (the first inscription).
 pub fn fetch_desc(
     cli: Client,
     bottom_height: u64,
@@ -29,7 +30,7 @@ pub fn fetch_desc(
         yield (last_accepted, Some((name_state, service_state, None)));
 
         loop {
-            if head_height == 0 || head_height < bottom_height {
+            if head_height <= 1 || head_height < bottom_height {
                 break;
             }
 
@@ -93,7 +94,7 @@ mod tests {
 
         let cli = Client::new(&ClientOptions { endpoint }).await.unwrap();
 
-        let s = fetch_desc(cli, 0);
+        let s = fetch_desc(cli, 1);
         pin_mut!(s); // needed for iteration
 
         // first item is always the last accepted inscription

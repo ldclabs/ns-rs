@@ -16,6 +16,8 @@ pub struct NameState {
     pub sequence: u64,
     pub block_height: u64,
     pub block_time: u64,
+    pub stale_time: u64,
+    pub expire_time: u64,
     pub threshold: u8,
     pub key_kind: u8,
     pub public_keys: Vec<Vec<u8>>,
@@ -34,10 +36,6 @@ impl NameState {
 
     pub fn hash(&self) -> Result<Vec<u8>, Error> {
         hash_sha3(self)
-    }
-
-    pub fn is_stale(&self, block_time: u64) -> bool {
-        self.block_time + NAME_STALE_SECONDS < block_time
     }
 
     pub fn verify_the_next(
@@ -65,6 +63,8 @@ impl NameState {
                 sequence: next.sequence,
                 block_height,
                 block_time,
+                stale_time: block_time + NAME_STALE_SECONDS,
+                expire_time: block_time + NAME_EXPIRE_SECONDS,
                 threshold: self.threshold,
                 key_kind: self.key_kind,
                 public_keys: self.public_keys.clone(),
@@ -80,6 +80,8 @@ impl NameState {
             next_state.sequence = next.sequence;
             next_state.block_height = block_height;
             next_state.block_time = block_time;
+            next_state.stale_time = block_time + NAME_STALE_SECONDS;
+            next_state.expire_time = block_time + NAME_EXPIRE_SECONDS;
             next_state.next_public_keys = None;
             return Ok(next_state);
         }
@@ -96,6 +98,8 @@ impl NameState {
                         sequence: next.sequence,
                         block_height,
                         block_time,
+                        stale_time: block_time + NAME_STALE_SECONDS,
+                        expire_time: block_time + NAME_EXPIRE_SECONDS,
                         threshold: next_state.threshold,
                         key_kind: next_state.key_kind,
                         public_keys: next_state.public_keys.clone(),
@@ -104,7 +108,7 @@ impl NameState {
                 }
                 1 => {
                     // update public_keys
-                    let allow_update = (next_state.block_time + NAME_EXPIRE_SECONDS < block_time)
+                    let allow_update = (next_state.expire_time < block_time)
                         || (next_state.next_public_keys.is_some()
                             && next_state.next_public_keys.as_ref().unwrap()
                                 == &public_key_params.public_keys);
@@ -120,6 +124,8 @@ impl NameState {
                         sequence: next.sequence,
                         block_height,
                         block_time,
+                        stale_time: block_time + NAME_STALE_SECONDS,
+                        expire_time: block_time + NAME_EXPIRE_SECONDS,
                         threshold: public_key_params
                             .threshold
                             .unwrap_or(public_key_params.public_keys.len() as u8),
@@ -243,6 +249,7 @@ pub struct Inscription {
     pub name: String,
     pub sequence: u64,
     pub height: u64,
+    pub name_height: u64,
     pub previous_hash: Vec<u8>,
     pub name_hash: Vec<u8>,
     pub service_hash: Vec<u8>,
@@ -322,9 +329,8 @@ mod tests {
             block_height: 1,
             block_time: 1,
             threshold: 1,
-            key_kind: 0,
             public_keys: vec![s1.verifying_key().to_bytes().to_vec()],
-            next_public_keys: None,
+            ..Default::default()
         };
 
         let mut next_name = ns::Name {
@@ -394,6 +400,8 @@ mod tests {
         assert_eq!(1, name_state.sequence);
         assert_eq!(3, name_state.block_height);
         assert_eq!(3, name_state.block_time);
+        assert_eq!(3 + NAME_STALE_SECONDS, name_state.stale_time);
+        assert_eq!(3 + NAME_EXPIRE_SECONDS, name_state.expire_time);
         assert_eq!(1, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
@@ -462,6 +470,8 @@ mod tests {
         assert_eq!(2, name_state.sequence);
         assert_eq!(5, name_state.block_height);
         assert_eq!(5, name_state.block_time);
+        assert_eq!(5 + NAME_STALE_SECONDS, name_state.stale_time);
+        assert_eq!(5 + NAME_EXPIRE_SECONDS, name_state.expire_time);
         assert_eq!(2, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
@@ -521,6 +531,8 @@ mod tests {
         assert_eq!(3, name_state.sequence);
         assert_eq!(7, name_state.block_height);
         assert_eq!(7, name_state.block_time);
+        assert_eq!(7 + NAME_STALE_SECONDS, name_state.stale_time);
+        assert_eq!(7 + NAME_EXPIRE_SECONDS, name_state.expire_time);
         assert_eq!(1, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
@@ -555,12 +567,15 @@ mod tests {
         next_name.sign_with(&s2).unwrap();
         next_name.validate().unwrap();
 
+        let block_time = name_state.expire_time + 1;
         let name_state = name_state
-            .verify_the_next(8, 8 + NAME_EXPIRE_SECONDS, &next_name)
+            .verify_the_next(8, block_time, &next_name)
             .unwrap();
         assert_eq!(4, name_state.sequence);
         assert_eq!(8, name_state.block_height);
-        assert_eq!(8 + NAME_EXPIRE_SECONDS, name_state.block_time);
+        assert_eq!(block_time, name_state.block_time);
+        assert_eq!(block_time + NAME_STALE_SECONDS, name_state.stale_time);
+        assert_eq!(block_time + NAME_EXPIRE_SECONDS, name_state.expire_time);
         assert_eq!(1, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
