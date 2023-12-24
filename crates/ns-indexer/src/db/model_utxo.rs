@@ -40,35 +40,6 @@ impl Utxo {
         spent: &Vec<utxo::UTXO>,
         unspent: &Vec<(Vec<u8>, utxo::UTXO)>,
     ) -> anyhow::Result<()> {
-        // delete spent utxos
-        let mut start = 0;
-        while start < spent.len() {
-            let end = if start + 1000 > spent.len() {
-                spent.len()
-            } else {
-                start + 1000
-            };
-            let mut statements: Vec<&str> = Vec::with_capacity(end - start);
-            let mut values: Vec<Vec<CqlValue>> = Vec::with_capacity(end - start);
-            let query = "DELETE FROM utxo WHERE txid=? AND vout=?";
-
-            for tx in &spent[start..end] {
-                statements.push(query);
-                values.push(vec![tx.txid.to_cql(), (tx.vout as i32).to_cql()]);
-            }
-
-            if statements.len() > 500 {
-                log::info!(target: "ns-indexer",
-                    action = "handle_spent_utxos",
-                    statements = statements.len();
-                    "",
-                );
-            }
-
-            let _ = db.batch(statements, values).await?;
-            start = end;
-        }
-
         let mut start = 0;
         while start < unspent.len() {
             let end = if start + 1000 > unspent.len() {
@@ -99,7 +70,40 @@ impl Utxo {
                 );
             }
 
-            let _ = db.batch(statements, values).await?;
+            let _ = db
+                .batch(scylladb::BatchType::Unlogged, statements, values)
+                .await?;
+            start = end;
+        }
+
+        // delete spent utxos after insert unspent utxos
+        let mut start = 0;
+        while start < spent.len() {
+            let end = if start + 1000 > spent.len() {
+                spent.len()
+            } else {
+                start + 1000
+            };
+            let mut statements: Vec<&str> = Vec::with_capacity(end - start);
+            let mut values: Vec<Vec<CqlValue>> = Vec::with_capacity(end - start);
+            let query = "DELETE FROM utxo WHERE txid=? AND vout=?";
+
+            for tx in &spent[start..end] {
+                statements.push(query);
+                values.push(vec![tx.txid.to_cql(), (tx.vout as i32).to_cql()]);
+            }
+
+            if statements.len() > 500 {
+                log::info!(target: "ns-indexer",
+                    action = "handle_spent_utxos",
+                    statements = statements.len();
+                    "",
+                );
+            }
+
+            let _ = db
+                .batch(scylladb::BatchType::Unlogged, statements, values)
+                .await?;
             start = end;
         }
 

@@ -408,7 +408,11 @@ impl Inscription {
             };
 
             let _ = db
-                .batch(statements[start..end].to_vec(), &values[start..end])
+                .batch(
+                    scylladb::BatchType::Logged,
+                    statements[start..end].to_vec(),
+                    &values[start..end],
+                )
                 .await?;
             start = end;
         }

@@ -203,7 +203,9 @@ impl NameState {
             statements.push(query.as_str());
             values.push((state.0, state.1 as i64));
         }
-        let _ = db.batch(statements, values).await?;
+        let _ = db
+            .batch(scylladb::BatchType::Unlogged, statements, values)
+            .await?;
         Ok(())
     }
 
@@ -220,7 +222,9 @@ impl NameState {
             statements.push(query);
             values.push((state.0, state.1));
         }
-        let _ = db.batch(statements, values).await?;
+        let _ = db
+            .batch(scylladb::BatchType::Unlogged, statements, values)
+            .await?;
         Ok(())
     }
 
@@ -248,7 +252,9 @@ impl NameState {
             statements.push(query.as_str());
             values.push((state.0, state.1));
         }
-        let _ = db.batch(statements, values).await?;
+        let _ = db
+            .batch(scylladb::BatchType::Unlogged, statements, values)
+            .await?;
         Ok(())
     }
 

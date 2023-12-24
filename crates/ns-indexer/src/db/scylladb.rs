@@ -12,7 +12,7 @@ use scylla::{
 use std::{sync::Arc, time::Duration};
 
 pub use scylla::{
-    batch::Batch,
+    batch::{Batch, BatchStatement, BatchType},
     frame::response::result::{ColumnType, Row},
     query::Query,
     Bytes,
@@ -97,13 +97,14 @@ impl ScyllaDB {
     // BATCH with conditions cannot span multiple tables
     pub async fn batch(
         &self,
-        statements: Vec<&str>,
+        batch_type: BatchType,
+        statements: Vec<impl Into<BatchStatement>>,
         values: impl BatchValues,
     ) -> anyhow::Result<QueryResult> {
-        let mut batch: Batch = Default::default();
-        for statement in statements {
-            batch.append_statement(statement);
-        }
+        let batch = Batch::new_with_statements(
+            batch_type,
+            statements.into_iter().map(|s| s.into()).collect(),
+        );
         let res = self.session.batch(&batch, values).await?;
         Ok(res)
     }
