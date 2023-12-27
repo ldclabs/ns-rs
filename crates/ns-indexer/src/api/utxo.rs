@@ -56,8 +56,10 @@ impl UtxoAPI {
             for spent in &utxo.1 {
                 utxos.remove(&(&spent.txid, spent.vout));
             }
-            for (_, unspent) in &utxo.2 {
-                utxos.insert((&unspent.txid, unspent.vout), unspent.clone());
+            for (addr, unspent) in &utxo.2 {
+                if addr == &address {
+                    utxos.insert((&unspent.txid, unspent.vout), unspent.clone());
+                }
             }
         }
 

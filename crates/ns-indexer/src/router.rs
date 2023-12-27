@@ -4,6 +4,7 @@ use tower::ServiceBuilder;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::{predicate::SizeAbove, CompressionLayer},
+    cors::CorsLayer,
 };
 
 use ns_axum_web::context;
@@ -15,6 +16,7 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
     let mds = ServiceBuilder::new()
         .layer(CatchPanicLayer::new())
         .layer(middleware::from_fn(context::middleware))
+        .layer(CorsLayer::very_permissive())
         .layer(CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)));
 
     Router::new()
