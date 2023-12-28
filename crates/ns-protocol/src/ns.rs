@@ -19,7 +19,7 @@ pub(crate) const NS_PREFIX: [u8; 3] = [0xd8, 0x35, 0x84]; // d835: tag(53), 84: 
 pub struct Name {
     pub name: String,
     pub sequence: u64,
-    pub payload: Service,
+    pub service: Service,
     pub signatures: Vec<Signature>,
 }
 
@@ -202,7 +202,7 @@ impl Name {
         let arr = Value::Array(vec![
             Value::from(self.name.clone()),
             Value::from(self.sequence),
-            Value::from(&self.payload),
+            Value::from(&self.service),
         ]);
         let mut buf: Vec<u8> = Vec::new();
         into_writer(&arr, &mut buf).map_err(|err| Error::Custom(err.to_string()))?;
@@ -225,15 +225,15 @@ impl Name {
             )));
         }
 
-        if self.payload.code > i64::MAX as u64 {
+        if self.service.code > i64::MAX as u64 {
             return Err(Error::Custom(format!(
-                "Name: invalid payload code {}, expected less than {}",
-                self.payload.code,
+                "Name: invalid service code {}, expected less than {}",
+                self.service.code,
                 i64::MAX
             )));
         }
 
-        if let Some(approver) = &self.payload.approver {
+        if let Some(approver) = &self.service.approver {
             if !valid_name(approver) {
                 return Err(Error::Custom(format!(
                     "Name: invalid approver {}",
@@ -242,7 +242,7 @@ impl Name {
             }
         }
 
-        if self.payload.operations.is_empty() {
+        if self.service.operations.is_empty() {
             return Err(Error::Custom("Name: missing operations".to_string()));
         }
 
@@ -405,7 +405,7 @@ impl From<&Name> for Value {
         Value::Array(vec![
             Value::from(name.name.clone()),
             Value::from(name.sequence),
-            Value::from(&name.payload),
+            Value::from(&name.service),
             Value::Array(name.signatures.iter().map(Value::from).collect()),
         ])
     }
@@ -634,7 +634,7 @@ impl TryFrom<&Value> for Name {
                     .map_err(|err| {
                         Error::Custom(format!("Name: expected u64, error: {:?}", err))
                     })?,
-                payload: Service::try_from(&arr[2])?,
+                service: Service::try_from(&arr[2])?,
                 signatures: arr[3]
                     .as_array()
                     .ok_or_else(|| {
@@ -829,7 +829,7 @@ mod tests {
         let mut name = Name {
             name: "a".to_string(),
             sequence: 0,
-            payload: Service {
+            service: Service {
                 code: 0,
                 operations: vec![Operation {
                     subcode: 1,
@@ -891,7 +891,7 @@ mod tests {
         let mut name = Name {
             name: "道".to_string(),
             sequence: 0,
-            payload: Service {
+            service: Service {
                 code: 0,
                 operations: vec![Operation {
                     subcode: 1,

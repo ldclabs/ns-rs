@@ -455,7 +455,7 @@ async fn main() -> anyhow::Result<()> {
                 let mut n = Name {
                     name: name.clone(),
                     sequence: 0,
-                    payload: Service {
+                    service: Service {
                         code: 0,
                         operations: vec![Operation {
                             subcode: 1,
@@ -472,6 +472,7 @@ async fn main() -> anyhow::Result<()> {
 
             let res = Inscriber::preview_inscription_transactions(&ns, fee_rate)?;
 
+            println!("inscriptions: {}", ns.len());
             println!(
                 "commit_tx: {} bytes, {} vBytes",
                 res.0.total_size(),
@@ -482,8 +483,13 @@ async fn main() -> anyhow::Result<()> {
                 res.1.total_size(),
                 res.1.vsize()
             );
-            println!("total bytes: {}", res.0.total_size() + res.1.total_size());
-            println!("min cost: {}", res.2);
+            println!(
+                "total bytes: {}, {} vBytes",
+                res.0.total_size() + res.1.total_size(),
+                res.0.vsize() + res.1.vsize()
+            );
+            println!("estimate fee: {}", res.2 - res.1.output[0].value);
+            println!("min balance (fee + min change): {}", res.2);
             return Ok(());
         }
 
@@ -524,7 +530,7 @@ async fn main() -> anyhow::Result<()> {
                 let mut n = Name {
                     name: name.clone(),
                     sequence: 0,
-                    payload: Service {
+                    service: Service {
                         code: 0,
                         operations: vec![Operation {
                             subcode: 1,

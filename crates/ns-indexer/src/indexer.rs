@@ -219,23 +219,23 @@ impl Indexer {
         name.validate()?;
         // default protocol is Name service
         let mut service_protocol = ServiceProtocol::default();
-        if name.payload.code > 0 {
+        if name.service.code > 0 {
             // try to get latest service protocol from db
             let protocol =
-                db::ServiceProtocol::get_latest(&self.scylla, name.payload.code as i64, vec![])
+                db::ServiceProtocol::get_latest(&self.scylla, name.service.code as i64, vec![])
                     .await
                     .map_err(|err| {
                         anyhow::anyhow!(
                             "failed to get latest service protocol, code: {}, err: {}",
-                            name.payload.code,
+                            name.service.code,
                             err
                         )
                     })?;
             service_protocol = protocol.to_index()?;
         };
-        service_protocol.validate(&name.payload)?;
+        service_protocol.validate(&name.service)?;
 
-        if let Some(ref approver) = name.payload.approver {
+        if let Some(ref approver) = name.service.approver {
             let mut approver_state = db::NameState::with_pk(approver.clone());
             approver_state
                 .get_one(&self.scylla, vec![])
@@ -259,7 +259,7 @@ impl Indexer {
                 let prev_service_state = names
                     .iter()
                     .filter_map(|(_, service_state, _)| {
-                        if service_state.code == name.payload.code {
+                        if service_state.code == name.service.code {
                             Some(service_state)
                         } else {
                             None
@@ -283,7 +283,7 @@ impl Indexer {
         if prev_state.0.is_some() && prev_state.1.is_none() {
             // try to get accepted state from db
             let mut service_state =
-                db::ServiceState::with_pk(name.name.clone(), name.payload.code as i64);
+                db::ServiceState::with_pk(name.name.clone(), name.service.code as i64);
             if service_state.get_one(&self.scylla, vec![]).await.is_ok() {
                 prev_state.1 = Some(service_state.to_index()?);
             }
@@ -297,10 +297,10 @@ impl Indexer {
             } else {
                 ServiceState {
                     name: name.name.clone(),
-                    code: name.payload.code,
+                    code: name.service.code,
                     sequence: name.sequence,
                     data: name
-                        .payload
+                        .service
                         .operations
                         .iter()
                         .map(|op| (op.subcode, op.params.clone()))
@@ -330,19 +330,19 @@ impl Indexer {
                 name.sequence
             );
         }
-        if name.payload.code != 0 {
+        if name.service.code != 0 {
             anyhow::bail!(
                 "invalid code for new name, expected: 0, got: {}",
-                name.payload.code
+                name.service.code
             );
         }
-        if name.payload.operations.len() != 1 {
+        if name.service.operations.len() != 1 {
             anyhow::bail!(
                 "invalid operations length for new name, expected: 1, got: {}",
-                name.payload.operations.len()
+                name.service.operations.len()
             );
         }
-        let op = &name.payload.operations[0];
+        let op = &name.service.operations[0];
         if op.subcode != 1 {
             anyhow::bail!(
                 "invalid operation subcode for new name, expected: 1, got: {}",

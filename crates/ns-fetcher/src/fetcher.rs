@@ -20,7 +20,7 @@ pub fn fetch_desc(
     try_stream! {
         let last_accepted: Inscription = cli.get_last_accepted_inscription().await?;
         let name_state: NameState = cli.get_name_state(&last_accepted.name).await?;
-        let service_state: ServiceState = cli.get_service_state(&last_accepted.name, last_accepted.data.payload.code).await?;
+        let service_state: ServiceState = cli.get_service_state(&last_accepted.name, last_accepted.data.service.code).await?;
 
         let mut bloom = Bloom::new_for_fp_rate(last_accepted.height as usize, 0.0001);
         let mut head_height = last_accepted.height;
@@ -48,7 +48,7 @@ pub fn fetch_desc(
             }
 
             let name_state: NameState = cli.get_name_state(&inscription.name).await?;
-            let service_state: ServiceState = cli.get_service_state(&inscription.name, inscription.data.payload.code).await?;
+            let service_state: ServiceState = cli.get_service_state(&inscription.name, inscription.data.service.code).await?;
 
             bloom.set(&head_inscription.name);
             // false positives are possible from bloom, but it's ok

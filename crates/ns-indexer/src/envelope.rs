@@ -98,7 +98,7 @@ mod tests {
         let mut name1 = Name {
             name: "a".to_string(),
             sequence: 0,
-            payload: Service {
+            service: Service {
                 code: 0,
                 operations: vec![Operation {
                     subcode: 1,
@@ -116,7 +116,7 @@ mod tests {
         let mut name2 = Name {
             name: "aa".to_string(),
             sequence: 0,
-            payload: Service {
+            service: Service {
                 code: 0,
                 operations: vec![Operation {
                     subcode: 1,

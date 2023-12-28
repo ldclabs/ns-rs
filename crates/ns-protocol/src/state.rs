@@ -56,7 +56,7 @@ impl NameState {
             )));
         }
 
-        if next.payload.code != 0 {
+        if next.service.code != 0 {
             next.verify(&self.public_key_params(), ThresholdLevel::Default)?;
             return Ok(NameState {
                 name: next.name.clone(),
@@ -74,7 +74,7 @@ impl NameState {
 
         // handle the `0` service code (Name service)
         let mut next_state = self.clone();
-        if next.payload.operations.len() == 1 && next.payload.operations[0].subcode == 0 {
+        if next.service.operations.len() == 1 && next.service.operations[0].subcode == 0 {
             // This is the lightweight update operation
             next.verify(&next_state.public_key_params(), ThresholdLevel::Default)?;
             next_state.sequence = next.sequence;
@@ -86,7 +86,7 @@ impl NameState {
             return Ok(next_state);
         }
 
-        for op in &next.payload.operations {
+        for op in &next.service.operations {
             let public_key_params = PublicKeyParams::try_from(&op.params)?;
             public_key_params.validate()?;
             match op.subcode {
@@ -169,20 +169,20 @@ impl ServiceState {
             )));
         }
 
-        if next.payload.code != self.code {
+        if next.service.code != self.code {
             return Err(Error::Custom(format!(
                 "invalid service code, expected: {}, got: {}",
-                self.code, next.payload.code
+                self.code, next.service.code
             )));
         }
 
         let mut next_state = ServiceState {
             name: next.name.clone(),
-            code: next.payload.code,
+            code: next.service.code,
             sequence: next.sequence,
             data: self.data.clone(),
         };
-        for op in &next.payload.operations {
+        for op in &next.service.operations {
             if let Some(i) = next_state.data.iter().position(|v| v.0 == op.subcode) {
                 // default to replace operation
                 // we should support other operations in the future
@@ -336,7 +336,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 1,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 1,
@@ -370,7 +370,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 1,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 2,
@@ -419,7 +419,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 2,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 1,
@@ -487,7 +487,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 3,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![
                     ns::Operation {
@@ -545,7 +545,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 4,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 1,
@@ -591,7 +591,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 5,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     // this operation will be overwritten
@@ -623,7 +623,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 6,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 0,
@@ -660,7 +660,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 7,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     // this operation will be overwritten
@@ -692,7 +692,7 @@ mod tests {
         let mut next_name = ns::Name {
             name: "test".to_string(),
             sequence: 8,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 123,
                 operations: vec![ns::Operation {
                     subcode: 0,
@@ -737,7 +737,7 @@ mod tests {
         let next_name = ns::Name {
             name: "test".to_string(),
             sequence: 1,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 0,
@@ -757,7 +757,7 @@ mod tests {
         let next_name = ns::Name {
             name: "test".to_string(),
             sequence: 2,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 0,
@@ -780,7 +780,7 @@ mod tests {
         let next_name = ns::Name {
             name: "test".to_string(),
             sequence: 3,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 3,
@@ -805,7 +805,7 @@ mod tests {
         let next_name = ns::Name {
             name: "test".to_string(),
             sequence: 4,
-            payload: ns::Service {
+            service: ns::Service {
                 code: 0,
                 operations: vec![ns::Operation {
                     subcode: 2,

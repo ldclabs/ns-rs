@@ -581,7 +581,7 @@ mod tests {
         let mut name = Name {
             name: name.to_string(),
             sequence: 0,
-            payload: Service {
+            service: Service {
                 code: 0,
                 operations: vec![Operation {
                     subcode: 1,
