@@ -30,16 +30,6 @@ fn main() -> anyhow::Result<()> {
     }
 
     tokio_builder.enable_all().build().unwrap().block_on(async {
-        let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
-        let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
-        let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
-
-        // 709632: This block marks the moment Taproot was activated on the Bitcoin network
-        let start_height = std::env::var("INDEXER_START_HEIGHT")
-            .unwrap_or("709632".to_string())
-            .parse::<u64>()
-            .unwrap();
-
         let scylla = ScyllaDBOptions {
             nodes: std::env::var("SCYLLA_NODES")
                 .unwrap()
@@ -51,13 +41,6 @@ fn main() -> anyhow::Result<()> {
             keyspace: std::env::var("SCYLLA_KEYSPACE").unwrap_or_default(),
         };
 
-        let bitcoin = BitcoinRPC::new(&BitcoinRPCOptions {
-            rpcurl,
-            rpcuser,
-            rpcpassword,
-        })
-        .await?;
-
         let indexer = Indexer::new(&IndexerOptions {
             scylla,
             index_utxo: std::env::var("INDEXER_UTXO")
@@ -68,14 +51,7 @@ fn main() -> anyhow::Result<()> {
         .await?;
 
         let last_accepted_height = indexer.initialize().await?;
-        let start_height = if last_accepted_height > 0 {
-            last_accepted_height + 1
-        } else {
-            start_height
-        };
-
         let indexer = Arc::new(indexer);
-        let scanner = Scanner::new(Arc::new(bitcoin), indexer.clone());
 
         let indexer_api = IndexerAPI::new(indexer.clone());
         let app = router::new(Arc::new(indexer_api));
@@ -98,7 +74,10 @@ fn main() -> anyhow::Result<()> {
                 .await
             {
                 Ok(_) => log::info!(target: "server", "indexer api finished"),
-                Err(err) => log::error!(target: "server", "indexer api error: {}", err),
+                Err(err) => {
+                    log::error!(target: "server", "indexer api error: {}", err);
+                    Err(err)?;
+                }
             }
 
             Ok::<(), anyhow::Error>(())
@@ -107,12 +86,35 @@ fn main() -> anyhow::Result<()> {
         let scanning = std::env::var("INDEXER_SERVER_NOSCAN").unwrap_or_default() != "true";
         let background_job = async {
             if scanning {
+                let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
+                let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
+                let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
+
+                // 709632: This block marks the moment Taproot was activated on the Bitcoin network
+                let start_height = std::env::var("INDEXER_START_HEIGHT")
+                    .unwrap_or("709632".to_string())
+                    .parse::<u64>()
+                    .unwrap();
+                let start_height = if last_accepted_height > 0 {
+                    last_accepted_height + 1
+                } else {
+                    start_height
+                };
+
+                let bitcoin = BitcoinRPC::new(&BitcoinRPCOptions {
+                    rpcurl,
+                    rpcuser,
+                    rpcpassword,
+                })
+                .await?;
+
+                let scanner = Scanner::new(Arc::new(bitcoin), indexer.clone());
+
                 match scanner.run(shutdown.clone(), start_height).await {
                     Ok(_) => log::info!(target: "server", "scanner finished"),
                     Err(err) => {
                         log::error!(target: "server", "scanner error: {}", err);
-                        // should exit the process and restart
-                        return Err(err);
+                        Err(err)?;
                     }
                 }
             }
