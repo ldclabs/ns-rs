@@ -61,6 +61,7 @@ tower-http = { version = "0.5", features = [
   "decompression-zstd",
   "propagate-header",
   "cors",
+  "timeout",
 ] }
 validator = { version = "0.16", features = ["derive"] }
 

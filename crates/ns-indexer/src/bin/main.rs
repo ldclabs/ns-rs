@@ -93,16 +93,12 @@ fn main() -> anyhow::Result<()> {
                 .await
                 .expect("failed to bind");
 
-            // wait for "graceful shutdown" https://github.com/tokio-rs/axum/pull/2398
-            // let res = axum::serve(listener, app).await;
-            tokio::select! {
-                _ = async {
-                    match axum::serve(listener, app).await {
-                        Ok(_) => log::info!(target: "server", "indexer api finished"),
-                        Err(err) => log::error!(target: "server", "indexer api error: {}", err),
-                    }
-                } => {},
-                _ = shutdown.clone() => {},
+            match axum::serve(listener, app)
+                .with_graceful_shutdown(shutdown.clone())
+                .await
+            {
+                Ok(_) => log::info!(target: "server", "indexer api finished"),
+                Err(err) => log::error!(target: "server", "indexer api error: {}", err),
             }
 
             Ok::<(), anyhow::Error>(())

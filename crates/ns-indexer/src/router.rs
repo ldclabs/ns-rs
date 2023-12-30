@@ -1,10 +1,11 @@
 use axum::{middleware, routing, Router};
 use std::sync::Arc;
-use tower::ServiceBuilder;
+use std::time::Duration;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     compression::{predicate::SizeAbove, CompressionLayer},
     cors::CorsLayer,
+    timeout::TimeoutLayer,
 };
 
 use ns_axum_web::context;
@@ -13,12 +14,6 @@ use ns_axum_web::encoding;
 use crate::api;
 
 pub fn new(state: Arc<api::IndexerAPI>) -> Router {
-    let mds = ServiceBuilder::new()
-        .layer(CatchPanicLayer::new())
-        .layer(middleware::from_fn(context::middleware))
-        .layer(CorsLayer::very_permissive())
-        .layer(CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)));
-
     Router::new()
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
@@ -81,6 +76,12 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
         //         .route("/list_by_code", routing::get(api::ServiceAPI::get))
         //         .route("/list_by_submitter", routing::get(api::ServiceAPI::get)),
         // )
-        .route_layer(mds)
+        .layer((
+            CatchPanicLayer::new(),
+            TimeoutLayer::new(Duration::from_secs(10)),
+            middleware::from_fn(context::middleware),
+            CorsLayer::very_permissive(),
+            CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)),
+        ))
         .with_state(state)
 }
