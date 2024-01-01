@@ -79,8 +79,8 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
         .layer((
             CatchPanicLayer::new(),
             TimeoutLayer::new(Duration::from_secs(10)),
-            middleware::from_fn(context::middleware),
             CorsLayer::very_permissive(),
+            middleware::from_fn(context::middleware),
             CompressionLayer::new().compress_when(SizeAbove::new(encoding::MIN_ENCODING_SIZE)),
         ))
         .with_state(state)

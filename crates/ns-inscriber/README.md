@@ -1,13 +1,23 @@
-# ns-inscriber
+# NS-Inscriber — NS-Protocol Inscriber library in Rust
+[![License](https://img.shields.io/crates/l/ns-inscriber.svg)](https://github.com/ldclabs/ns-rs/blob/main/LICENSE)
+[![Crates.io](https://img.shields.io/crates/d/ns-inscriber.svg)](https://crates.io/crates/ns-inscriber)
+[![CI](https://github.com/ldclabs/ns-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/ldclabs/ns-rs/actions/workflows/ci.yml)
+[![Docs.rs](https://img.shields.io/docsrs/ns-inscriber?label=docs.rs)](https://docs.rs/ns-inscriber)
+[![Latest Version](https://img.shields.io/crates/v/ns-inscriber.svg)](https://crates.io/crates/ns-inscriber)
 
 More information about the protocol can be found in the [protocol documentation](https://github.com/ldclabs/ns-protocol)
 
-## Development
+## Dependencies
+
+1. **Bitcoin RPC server** with `txindex` option enabled, don't need wallet. For example, run a regtest node:
 
 ```sh
-cargo run --package ns-inscriber --bin ns-inscriber
+bitcoind -regtest -txindex -rpcuser=test -rpcpassword=123456 -fallbackfee=0.00001
 ```
 
+## Development
+
+Build:
 ```sh
 cargo build --release --package ns-inscriber --bin ns-inscriber
 ```
@@ -25,7 +35,7 @@ run ns-inscriber with `my.env`
 ./target/release/ns-inscriber -c my.env list-keys
 ```
 
-This is the first transaction inscribed NS inscriptions on mainnet:
+This is the first transaction inscribed 36 NS inscriptions on mainnet:
 https://mempool.space/tx/8e9d3e0d762c1d2348a2ca046b36f8de001f740c976b09c046ee1f09a8680131
 
 ```sh

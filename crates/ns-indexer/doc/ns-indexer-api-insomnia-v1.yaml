@@ -1,0 +1,514 @@
+_type: export
+__export_format: 4
+__export_date: 2024-01-01T08:44:27.315Z
+__export_source: insomnia.desktop.app:v8.5.1
+resources:
+  - _id: req_b1a618c6a5b7424f82a71b4d04a382db
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702698745892
+    created: 1702698504320
+    url: "{{ _.api_host }}"
+    name: version
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1702698504320
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: wrk_6740d036556540e7972210367d3cbc69
+    parentId: null
+    modified: 1702698428340
+    created: 1702698428340
+    name: Indexer API
+    description: ""
+    scope: collection
+    _type: workspace
+  - _id: req_fb4432b8270d4adbb35cb433cced3a64
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702866632688
+    created: 1702866629420
+    url: "{{ _.api_host }}/healthz"
+    name: healthz
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1702053230687.125
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_c4a8deb0e59343708f6540522b0772f6
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702901552482
+    created: 1702871420490
+    url: "{{ _.api_host }}/best/inscription"
+    name: best_inscription/get
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1701730593870.6875
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_56d3cfbe6d7943098e89d202c0edd557
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702901563095
+    created: 1702877817796
+    url: "{{ _.api_host }}/best/inscription/list"
+    name: best_inscription/list
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1701569275462.4688
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_f7592cdb232f44468a3031caedeaf11f
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702866762535
+    created: 1702698617621
+    url: "{{ _.api_host }}/v1/inscription/get_last_accepted"
+    name: inscription/get_last_accepted
+    description: ""
+    method: GET
+    body: {}
+    parameters: []
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1701407957054.25
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_30f12652f3fb4144af158d9a3d1b6434
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702883231637
+    created: 1702871128052
+    url: "{{ _.api_host }}/v1/inscription"
+    name: inscription/get
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: x
+        description: ""
+      - id: pair_60b9d84322f24fedb352e8ad55452d15
+        name: sequence
+        value: "0"
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700762683421.375
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_60a7efaf232c4475b0c8fb3b4d7bd873
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1703582071809
+    created: 1702876103163
+    url: "{{ _.api_host }}/v1/inscription/get_by_height"
+    name: inscription/get_by_height
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: height
+        value: "1626"
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700440046604.9375
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_f7e89440967e48c9939f83973103df31
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702877894719
+    created: 1702877850949
+    url: "{{ _.api_host }}/v1/inscription/list_by_block_height"
+    name: inscription/list_by_block_height
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: height
+        value: "1717"
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700278728096.7188
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_43d914ea99bd4c37b2e05852e4135d21
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702877928506
+    created: 1702877920642
+    url: "{{ _.api_host }}/v1/inscription/list_by_name"
+    name: inscription/list_by_name
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: a
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700198068942.6094
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_6fc6a59e4f2841e59121ad6e2d44cfde
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1703163394889
+    created: 1702886244195
+    url: "{{ _.api_host }}/v1/invalid_inscription/list_by_name"
+    name: invalid_inscription/list_by_name
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: c
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700157739365.5547
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_c1217c2f6388434a88c0d2f0cf2d7d49
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1703302708284
+    created: 1702889481164
+    url: "{{ _.api_host }}/v1/name"
+    name: name/get
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: ab
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700137574527.0273
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_7d261365b6984044b69e2a297f025069
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702890952711
+    created: 1702889414058
+    url: "{{ _.api_host }}/v1/name/list_by_query"
+    name: name/list_by_query
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: a
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700132533342.3955
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_dd5a389d67954199aebace1743c87a4c
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1703481537337
+    created: 1702890914574
+    url: "{{ _.api_host }}/v1/name/list_by_pubkey"
+    name: name/list_by_pubkey
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: pubkey
+        value: "0x31d6ec328b42051a63c1619afad4e60b78f4991e62337918fe2d2e694a4f88f7"
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700127492157.7637
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_296a2e98b71f4202b845cc4f25917bf4
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702891898573
+    created: 1702891871184
+    url: "{{ _.api_host }}/v1/service"
+    name: service/get
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: a
+        description: ""
+      - id: pair_432f69bd7120412e897c6c62377e6abf
+        name: code
+        value: "0"
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700127492057.7637
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_d4af028055634898bb3a2be10d8378f3
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702891924373
+    created: 1702891918188
+    url: "{{ _.api_host }}/v1/service/list_by_name"
+    name: service/list_by_name
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: name
+        value: a
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700122450923.1318
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: req_1b571fe4b2c349eeb27f02211c72cfc3
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1703481569875
+    created: 1703043892732
+    url: "{{ _.api_host }}/best/utxo/list"
+    name: utxo/list_by_address
+    description: ""
+    method: GET
+    body: {}
+    parameters:
+      - id: pair_8352d8e48b92475fb3c8f48593275b6e
+        name: address
+        value: bc1q6dukpvmcxae0pdh95zgh793l5ept8fluhqqnyc
+        description: ""
+    headers:
+      - name: User-Agent
+        value: insomnia/8.4.5
+      - name: Accept
+        value: application/json
+    authentication: {}
+    metaSortKey: -1700119930355.816
+    isPrivate: false
+    settingStoreCookies: true
+    settingSendCookies: true
+    settingDisableRenderRequestBody: false
+    settingEncodeUrl: true
+    settingRebuildPath: true
+    settingFollowRedirects: global
+    _type: request
+  - _id: env_521c603fd2195d973072305ede8865ff09f1a5e4
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702698491521
+    created: 1702698428341
+    name: Base Environment
+    data:
+      api_host: http://127.0.0.1:8080
+    dataPropertyOrder:
+      "&":
+        - api_host
+    color: null
+    isPrivate: false
+    metaSortKey: 1702698428341
+    _type: environment
+  - _id: jar_521c603fd2195d973072305ede8865ff09f1a5e4
+    parentId: wrk_6740d036556540e7972210367d3cbc69
+    modified: 1702698428342
+    created: 1702698428342
+    name: Default Jar
+    cookies: []
+    _type: cookie_jar
+  - _id: env_c242bc8ccc83428bb4e09e9d838d69d8
+    parentId: env_521c603fd2195d973072305ede8865ff09f1a5e4
+    modified: 1703155318909
+    created: 1703155286210
+    name: testnet
+    data:
+      api_host: http://192.168.1.80:8081
+    dataPropertyOrder:
+      "&":
+        - api_host
+    color: null
+    isPrivate: false
+    metaSortKey: 1703155286210
+    _type: environment
+  - _id: env_dabf53418d4a4366b345ddca8e6796b2
+    parentId: env_521c603fd2195d973072305ede8865ff09f1a5e4
+    modified: 1703155332760
+    created: 1703155322589
+    name: mainnet
+    data:
+      api_host: http://192.168.1.80:8080
+    dataPropertyOrder:
+      "&":
+        - api_host
+    color: null
+    isPrivate: false
+    metaSortKey: 1703155286260
+    _type: environment

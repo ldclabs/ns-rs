@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn valid_name_works() {
-        for name in &["a", "abc", "公信", "0", "b0"] {
+        for name in &["a", "abc", "ʦ", "公信", "0", "b0"] {
             assert!(valid_name(name), "{} is invalid", name)
         }
         for name in &[
