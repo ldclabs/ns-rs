@@ -911,6 +911,12 @@ mod tests {
         assert!(name.verify(&params, ThresholdLevel::Strict).is_err());
         assert!(name.verify(&params, ThresholdLevel::All).is_err());
 
+        let mut invalid_name = name.clone();
+        invalid_name.sequence = 1;
+        assert!(invalid_name
+            .verify(&params, ThresholdLevel::Single)
+            .is_err());
+
         name.sign(&params, ThresholdLevel::Default, &signers)
             .unwrap();
         assert!(name.validate().is_ok());

@@ -29,6 +29,7 @@ pub struct BitCoinRPCOptions {
     pub rpcurl: String,
     pub rpcuser: String,
     pub rpcpassword: String,
+    pub rpctoken: String,
     pub network: Network,
 }
 
@@ -73,7 +74,10 @@ impl BitcoinRPC {
         common_headers.insert(header::ACCEPT_ENCODING, "gzip".parse()?);
 
         let url = reqwest::Url::parse(&opts.rpcurl)?;
-        if !opts.rpcuser.is_empty() {
+        if !opts.rpctoken.is_empty() {
+            let auth = format!("Bearer {}", opts.rpctoken);
+            common_headers.insert(header::AUTHORIZATION, auth.parse()?);
+        } else if !opts.rpcuser.is_empty() && !opts.rpcpassword.is_empty() {
             let auth = format!("{}:{}", opts.rpcuser, opts.rpcpassword);
             let auth = format!(
                 "Basic {}",
@@ -292,13 +296,15 @@ mod tests {
         dotenvy::from_filename("sample.env").expect(".env file not found");
 
         let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
-        let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
-        let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
+        let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap_or_default();
+        let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
+        let rpctoken = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
 
         let cli = BitcoinRPC::new(&BitCoinRPCOptions {
             rpcurl,
             rpcuser,
             rpcpassword,
+            rpctoken,
             network: Network::Regtest,
         })
         .unwrap();

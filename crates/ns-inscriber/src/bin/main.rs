@@ -567,12 +567,12 @@ async fn main() -> anyhow::Result<()> {
                     &ns,
                     fee_rate,
                     &keypair.secret_key(),
-                    &vec![UnspentTxOut {
+                    &UnspentTxOut {
                         txid,
                         vout: vout as u32,
                         amount: txout.value,
                         script_pubkey: txout.script_pubkey.clone(),
-                    }],
+                    },
                 )
                 .await?;
 
@@ -634,14 +634,16 @@ impl KekEncryptor {
 
 async fn get_inscriber(network: Network) -> anyhow::Result<Inscriber> {
     let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
-    let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
-    let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
+    let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap_or_default();
+    let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
+    let rpctoken = std::env::var("BITCOIN_RPC_TOKEN").unwrap_or_default();
 
     let inscriber = Inscriber::new(&InscriberOptions {
         bitcoin: BitCoinRPCOptions {
             rpcurl,
             rpcuser,
             rpcpassword,
+            rpctoken,
             network,
         },
     })?;

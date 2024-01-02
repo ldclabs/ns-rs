@@ -58,12 +58,35 @@ impl Inscriber {
         names: &Vec<Name>,
         fee_rate: Amount,
         secret: &SecretKey,
-        unspent_txouts: &Vec<UnspentTxOut>,
+        unspent_txout: &UnspentTxOut,
     ) -> anyhow::Result<Txid> {
+        let (signed_commit_tx, signed_reveal_tx) = self
+            .build_signed_inscription(names, fee_rate, secret, unspent_txout)
+            .await?;
+
+        let commit = self.bitcoin.send_transaction(&signed_commit_tx).await?;
+        let reveal = self
+            .bitcoin
+            .send_transaction(&signed_reveal_tx)
+            .await
+            .map_err(|err| {
+                anyhow::anyhow!("failed to send reveal transaction: {err}\ncommit tx: {commit}")
+            })?;
+
+        Ok(reveal)
+    }
+
+    pub async fn build_signed_inscription(
+        &self,
+        names: &Vec<Name>,
+        fee_rate: Amount,
+        secret: &SecretKey,
+        unspent_txout: &UnspentTxOut,
+    ) -> anyhow::Result<(Transaction, Transaction)> {
         let keypair = Keypair::from_secret_key(&self.secp, secret);
 
-        let (unspent_txout, unsigned_commit_tx, signed_reveal_tx) = self
-            .build_inscription_transactions(names, fee_rate, unspent_txouts, Some(keypair))
+        let (unsigned_commit_tx, signed_reveal_tx) = self
+            .build_inscription_transactions(names, fee_rate, unspent_txout, Some(keypair))
             .await?;
 
         let mut signed_commit_tx = unsigned_commit_tx;
@@ -130,16 +153,7 @@ impl Inscriber {
             }
         }
 
-        let commit = self.bitcoin.send_transaction(&signed_commit_tx).await?;
-        let reveal = self
-            .bitcoin
-            .send_transaction(&signed_reveal_tx)
-            .await
-            .map_err(|err| {
-                anyhow::anyhow!("failed to send reveal transaction: {err}\ncommit tx: {commit}")
-            })?;
-
-        Ok(reveal)
+        Ok((signed_commit_tx, signed_reveal_tx))
     }
 
     pub async fn send_sats(
@@ -263,17 +277,14 @@ impl Inscriber {
         &self,
         names: &Vec<Name>,
         fee_rate: Amount,
-        unspent_txouts: &Vec<UnspentTxOut>,
+        unspent_txout: &UnspentTxOut,
         inscription_keypair: Option<Keypair>,
-    ) -> anyhow::Result<(UnspentTxOut, Transaction, Transaction)> {
+    ) -> anyhow::Result<(Transaction, Transaction)> {
         if names.is_empty() {
             anyhow::bail!("no names to inscribe");
         }
         if fee_rate.to_sat() == 0 {
             anyhow::bail!("fee rate cannot be zero");
-        }
-        if unspent_txouts.is_empty() {
-            anyhow::bail!("no unspent transaction out");
         }
 
         if let Some(name) = check_duplicate(names) {
@@ -286,21 +297,12 @@ impl Inscriber {
             }
         }
 
-        let (_, _, p_value) = Inscriber::preview_inscription_transactions(names, fee_rate)?;
-        let mut unspent_tx = &unspent_txouts[0];
-        // select a befitting unspent transaction out
-        for tx in unspent_txouts {
-            if tx.amount > p_value && tx.amount < unspent_tx.amount {
-                unspent_tx = &tx;
-            }
-        }
-
         let keypair = inscription_keypair
             .unwrap_or_else(|| Keypair::new(&self.secp, &mut rand::thread_rng()));
 
         let (unsigned_commit_tx, signed_reveal_tx) =
-            self.create_inscription_transactions(names, fee_rate, unspent_tx, &keypair)?;
-        Ok((unspent_tx.to_owned(), unsigned_commit_tx, signed_reveal_tx))
+            self.create_inscription_transactions(names, fee_rate, unspent_txout, &keypair)?;
+        Ok((unsigned_commit_tx, signed_reveal_tx))
     }
 
     pub fn preview_inscription_transactions(
@@ -625,8 +627,9 @@ mod tests {
         dotenvy::from_filename("sample.env").expect(".env file not found");
 
         let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
-        let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap();
-        let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap();
+        let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap_or_default();
+        let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
+        let rpctoken = std::env::var("BITCOIN_RPC_TOKEN").unwrap_or_default();
         let network = Network::from_core_arg(&std::env::var("BITCOIN_NETWORK").unwrap_or_default())
             .unwrap_or(Network::Regtest);
 
@@ -645,6 +648,7 @@ mod tests {
                 rpcurl,
                 rpcuser,
                 rpcpassword,
+                rpctoken,
                 network,
             },
         })
@@ -702,7 +706,12 @@ mod tests {
         let names = vec![get_name("0")];
         let fee_rate = Amount::from_sat(20);
         let txid = inscriber
-            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs)
+            .inscribe(
+                &names,
+                fee_rate,
+                &keypair.secret_key(),
+                &unspent_txs.first().unwrap(),
+            )
             .await
             .unwrap();
         println!("txid: {}", txid);
@@ -762,7 +771,12 @@ mod tests {
         assert_eq!("z", names[35].name);
 
         let txid = inscriber
-            .inscribe(&names, fee_rate, &keypair.secret_key(), &unspent_txs)
+            .inscribe(
+                &names,
+                fee_rate,
+                &keypair.secret_key(),
+                &unspent_txs.first().unwrap(),
+            )
             .await
             .unwrap();
         println!("txid: {}", txid);
