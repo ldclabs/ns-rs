@@ -272,6 +272,119 @@ impl Inscriber {
         Ok(txid)
     }
 
+    pub async fn collect_sats(
+        &self,
+        fee_rate: Amount,
+        unspent_txouts: &Vec<(SecretKey, UnspentTxOut)>,
+        to: &Address<NetworkChecked>,
+    ) -> anyhow::Result<Txid> {
+        let amount = unspent_txouts.iter().map(|(_, v)| v.amount).sum::<Amount>();
+
+        let mut tx = Transaction {
+            version: Version::TWO,
+            lock_time: LockTime::ZERO,
+            input: unspent_txouts
+                .iter()
+                .map(|(_, v)| TxIn {
+                    previous_output: OutPoint {
+                        txid: v.txid,
+                        vout: v.vout,
+                    },
+                    script_sig: ScriptBuf::new(),
+                    sequence: Sequence::ENABLE_RBF_NO_LOCKTIME,
+                    witness: Witness::new(),
+                })
+                .collect(),
+            output: vec![TxOut {
+                value: amount,
+                script_pubkey: to.script_pubkey(),
+            }],
+        };
+
+        let fee = {
+            let mut v_tx = tx.clone();
+            for input in v_tx.input.iter_mut() {
+                input.witness = Witness::from_slice(&[&[0; SCHNORR_SIGNATURE_SIZE]]);
+            }
+            fee_rate
+                .checked_mul(v_tx.vsize() as u64)
+                .expect("should compute commit_tx fee")
+        };
+
+        let change_value = amount
+            .checked_sub(fee)
+            .ok_or_else(|| anyhow::anyhow!("should compute change value"))?;
+        tx.output[0].value = change_value;
+
+        let mut sighasher = SighashCache::new(&mut tx);
+
+        for (i, (secret, unspent_txout)) in unspent_txouts.iter().enumerate() {
+            let keypair = Keypair::from_secret_key(&self.secp, secret);
+
+            if unspent_txout.script_pubkey.is_p2tr() {
+                let tweaked: TweakedKeypair = keypair.tap_tweak(&self.secp, None);
+                let sighash = sighasher
+                    .taproot_key_spend_signature_hash(
+                        0,
+                        &Prevouts::All(&vec![TxOut {
+                            value: unspent_txout.amount,
+                            script_pubkey: unspent_txout.script_pubkey.clone(),
+                        }]),
+                        TapSighashType::Default,
+                    )
+                    .expect("failed to construct sighash");
+
+                let sig = self.secp.sign_schnorr(
+                    &Message::from_digest(sighash.to_byte_array()),
+                    &tweaked.to_inner(),
+                );
+
+                let signature = taproot::Signature {
+                    sig,
+                    hash_ty: TapSighashType::Default,
+                };
+
+                sighasher
+                    .witness_mut(i)
+                    .expect("getting mutable witness reference should work")
+                    .push(&signature.to_vec());
+            } else if unspent_txout.script_pubkey.is_p2wpkh() {
+                let sighash = sighasher
+                    .p2wpkh_signature_hash(
+                        0,
+                        &unspent_txout.script_pubkey,
+                        unspent_txout.amount,
+                        EcdsaSighashType::All,
+                    )
+                    .expect("failed to create sighash");
+
+                let sig = self
+                    .secp
+                    .sign_ecdsa(&Message::from(sighash), &keypair.secret_key());
+                let signature = ecdsa::Signature {
+                    sig,
+                    hash_ty: EcdsaSighashType::All,
+                };
+                *sighasher
+                    .witness_mut(i)
+                    .expect("getting mutable witness reference should work") =
+                    Witness::p2wpkh(&signature, &keypair.public_key());
+            } else {
+                anyhow::bail!("unsupported script_pubkey");
+            }
+        }
+
+        let test_txs = self.bitcoin.test_mempool_accept(&[&tx]).await?;
+        for r in &test_txs {
+            if !r.allowed {
+                anyhow::bail!("failed to accept transaction: {:?}", &test_txs);
+            }
+        }
+
+        let txid = self.bitcoin.send_transaction(&tx).await?;
+        Ok(txid)
+    }
+
     // return (to_spent_tx_out, unsigned_commit_tx, signed_reveal_tx)
     pub async fn build_inscription_transactions(
         &self,
