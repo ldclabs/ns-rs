@@ -298,7 +298,7 @@ mod tests {
         let rpcurl = std::env::var("BITCOIN_RPC_URL").unwrap();
         let rpcuser = std::env::var("BITCOIN_RPC_USER").unwrap_or_default();
         let rpcpassword = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
-        let rpctoken = std::env::var("BITCOIN_RPC_PASSWORD").unwrap_or_default();
+        let rpctoken = std::env::var("BITCOIN_RPC_TOKEN").unwrap_or_default();
 
         let cli = BitcoinRPC::new(&BitCoinRPCOptions {
             rpcurl,
