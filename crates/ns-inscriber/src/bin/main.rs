@@ -13,7 +13,7 @@ use terminal_prompt::Terminal;
 
 use ns_inscriber::{
     bitcoin::BitCoinRPCOptions,
-    inscriber::{Inscriber, InscriberOptions, UnspentTxOut},
+    inscriber::{Inscriber, InscriberOptions, UnspentTxOut, UnspentTxOutJSON},
     wallet::{
         base64_decode, base64_encode, base64url_decode, base64url_encode, ed25519, hash_256, iana,
         secp256k1, unwrap_cbor_tag, wrap_cbor_tag, DerivationPath, Encrypt0, Key,
@@ -128,8 +128,11 @@ pub enum Commands {
     /// Inscribe names to a transaction
     Inscribe {
         /// Unspent transaction id to spend
-        #[arg(long)]
+        #[arg(long, default_value = "")]
         txid: String,
+        /// Unspent txout in JSON format. If not provided, will use the first txout on txid
+        #[arg(long, default_value = "")]
+        txout_json: String,
         /// Bitcoin address on tx to operate on, will be combined to "{addr}.cose.key" to read secp256k key
         #[arg(long, value_name = "FILE")]
         addr: String,
@@ -495,12 +498,12 @@ async fn main() -> anyhow::Result<()> {
 
         Some(Commands::Inscribe {
             txid,
+            txout_json,
             addr,
             fee,
             key,
             names,
         }) => {
-            let txid: Txid = txid.parse()?;
             let fee_rate = Amount::from_sat(*fee);
             let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).collect();
             for name in &names {
@@ -555,25 +558,30 @@ async fn main() -> anyhow::Result<()> {
             let (p2wpkh_pubkey, p2tr_pubkey) = secp256k1::as_script_pubkey(&secp, &keypair);
 
             let inscriber = get_inscriber(network).await?;
-            let tx = inscriber.bitcoin.get_transaction(&txid).await?;
-            let (vout, txout) = tx
-                .output
-                .iter()
-                .enumerate()
-                .find(|(_, o)| o.script_pubkey == p2wpkh_pubkey || o.script_pubkey == p2tr_pubkey)
-                .ok_or(anyhow!("no matched transaction out to spend"))?;
+            let unspent_txout = if !txid.is_empty() {
+                let txid: Txid = txid.parse()?;
+                let tx = inscriber.bitcoin.get_transaction(&txid).await?;
+                let (vout, txout) = tx
+                    .output
+                    .iter()
+                    .enumerate()
+                    .find(|(_, o)| {
+                        o.script_pubkey == p2wpkh_pubkey || o.script_pubkey == p2tr_pubkey
+                    })
+                    .ok_or(anyhow!("no matched transaction out to spend"))?;
+                UnspentTxOut {
+                    txid,
+                    vout: vout as u32,
+                    amount: txout.value,
+                    script_pubkey: txout.script_pubkey.clone(),
+                }
+            } else {
+                let txout: UnspentTxOutJSON = serde_json::from_str(&txout_json)?;
+                txout.to()?
+            };
+
             let txid = inscriber
-                .inscribe(
-                    &ns,
-                    fee_rate,
-                    &keypair.secret_key(),
-                    &UnspentTxOut {
-                        txid,
-                        vout: vout as u32,
-                        amount: txout.value,
-                        script_pubkey: txout.script_pubkey.clone(),
-                    },
-                )
+                .inscribe(&ns, fee_rate, &keypair.secret_key(), &unspent_txout)
                 .await?;
 
             println!("txid: {}", txid);

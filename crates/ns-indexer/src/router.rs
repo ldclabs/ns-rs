@@ -17,7 +17,16 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
     Router::new()
         .route("/", routing::get(api::version))
         .route("/healthz", routing::get(api::healthz))
-        .route("/best/utxo/list", routing::get(api::UtxoAPI::list))
+        .nest(
+            "/best",
+            Router::new()
+                .route("/inscription", routing::get(api::InscriptionAPI::get_best))
+                .route(
+                    "/inscription/list",
+                    routing::get(api::InscriptionAPI::list_best),
+                )
+                .route("/utxo/list", routing::get(api::UtxoAPI::list)),
+        )
         .nest(
             "/v1/name",
             Router::new()
@@ -54,12 +63,6 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
                     "/list_by_name",
                     routing::get(api::InscriptionAPI::list_by_name),
                 ),
-        )
-        .nest(
-            "/best/inscription",
-            Router::new()
-                .route("/", routing::get(api::InscriptionAPI::get_best))
-                .route("/list", routing::get(api::InscriptionAPI::list_best)),
         )
         .nest(
             "/v1/invalid_inscription",

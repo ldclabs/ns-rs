@@ -1,9 +1,14 @@
 use bitcoin::{hashes::Hash, BlockHash, Transaction};
+use futures::future::Shared;
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
+    future::Future,
     sync::Arc,
 };
-use tokio::sync::RwLock;
+use tokio::{
+    sync::RwLock,
+    time::{sleep, Duration},
+};
 
 use ns_protocol::{
     ns::{Name, PublicKeyParams, ThresholdLevel},
@@ -92,6 +97,58 @@ impl Indexer {
             }
         }
         Ok(last_accepted_height.block_height as u64)
+    }
+
+    pub async fn scan_last_accepted<S>(&self, signal: Shared<S>) -> anyhow::Result<()>
+    where
+        S: Future<Output = ()>,
+    {
+        let mut height = 0i64;
+
+        loop {
+            tokio::select! {
+                _ = signal.clone() => {
+                    log::warn!(target: "ns-indexer", "Received signal to stop indexing");
+                    return Ok(());
+                },
+                _ = async {
+                        sleep(Duration::from_secs(3)).await;
+                } => {},
+            };
+
+            if let Some(checkpoint) = db::Checkpoint::get_last_accepted(&self.scylla).await? {
+                log::info!(target: "ns-indexer",
+                    action = "scan_last_accepted",
+                    last_accepted = checkpoint.name.clone(),
+                    new_last_accepted = checkpoint.height > height,
+                    height = checkpoint.height,
+                    block_height = checkpoint.block_height;
+                    "",
+                );
+
+                if checkpoint.height > height {
+                    let mut inscription =
+                        db::Inscription::with_pk(checkpoint.name.clone(), checkpoint.sequence);
+                    inscription.get_one(&self.scylla, vec![]).await?;
+
+                    let last_accepted = inscription.to_index()?;
+                    let last_checkpoint = inscription.to_checkpoint(last_accepted.hash()?)?;
+                    if last_checkpoint != checkpoint {
+                        anyhow::bail!(
+                            "last accepted inscription is not match with checkpoint:\n{:#?}\n{:#?}",
+                            last_checkpoint,
+                            checkpoint
+                        );
+                    }
+                    {
+                        let mut last_accepted_state = self.state.last_accepted.write().await;
+                        *last_accepted_state = Some(last_accepted.clone());
+                    }
+
+                    height = checkpoint.height;
+                }
+            }
+        }
     }
 
     pub async fn index(

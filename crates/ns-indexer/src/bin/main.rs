@@ -117,6 +117,14 @@ fn main() -> anyhow::Result<()> {
                         Err(err)?;
                     }
                 }
+            } else {
+                match indexer.scan_last_accepted(shutdown.clone()).await {
+                    Ok(_) => log::info!(target: "server", "indexer scanning finished"),
+                    Err(err) => {
+                        log::error!(target: "server", "indexer scanning error: {}", err);
+                        Err(err)?;
+                    }
+                }
             }
 
             Ok::<(), anyhow::Error>(())

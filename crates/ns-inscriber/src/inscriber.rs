@@ -18,7 +18,8 @@ use bitcoin::{
     Address, Amount, Network, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Txid,
     Witness,
 };
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, str::FromStr};
 
 use ns_protocol::ns::{Name, MAX_NAME_BYTES};
 
@@ -669,6 +670,34 @@ pub fn check_duplicate(names: &Vec<Name>) -> Option<String> {
     None
 }
 
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct UnspentTxOutJSON {
+    pub txid: String,
+    pub vout: u32,
+    pub amount: u64,
+    pub script_pubkey: String,
+}
+
+impl UnspentTxOutJSON {
+    pub fn to(&self) -> anyhow::Result<UnspentTxOut> {
+        Ok(UnspentTxOut {
+            txid: Txid::from_str(&self.txid)?,
+            vout: self.vout,
+            amount: Amount::from_sat(self.amount),
+            script_pubkey: ScriptBuf::from_hex(&self.script_pubkey)?,
+        })
+    }
+
+    pub fn from(tx: UnspentTxOut) -> Self {
+        Self {
+            txid: tx.txid.to_string(),
+            vout: tx.vout,
+            amount: tx.amount.to_sat(),
+            script_pubkey: tx.script_pubkey.to_hex_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -710,6 +739,20 @@ mod tests {
             .unwrap();
         assert!(name.validate().is_ok());
         name
+    }
+
+    #[test]
+    fn unspent_txout_json_works() {
+        let json_str = serde_json::json!({
+            "txid": "8e9d3e0d762c1d2348a2ca046b36f8de001f740c976b09c046ee1f09a8680131",
+            "vout": 0,
+            "amount": 4929400,
+            "script_pubkey": "0014d37960b3783772f0b6e5a0917f163fa642b3a7fc"
+        });
+        let json: UnspentTxOutJSON = serde_json::from_value(json_str).unwrap();
+        let tx = json.to().unwrap();
+        let json2 = UnspentTxOutJSON::from(tx);
+        assert_eq!(json, json2)
     }
 
     #[test]
