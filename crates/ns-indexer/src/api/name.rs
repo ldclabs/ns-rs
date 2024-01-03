@@ -39,6 +39,33 @@ impl NameAPI {
         Ok(to.with(SuccessResponse::new(name_state.to_index()?)))
     }
 
+    pub async fn get_best(
+        State(app): State<Arc<IndexerAPI>>,
+        Extension(ctx): Extension<Arc<ReqContext>>,
+        to: PackObject<()>,
+        input: Query<QueryName>,
+    ) -> Result<PackObject<SuccessResponse<NameState>>, HTTPError> {
+        input.validate()?;
+
+        let name = input.name.clone();
+        ctx.set_kvs(vec![
+            ("action", "get_best_name_state".into()),
+            ("name", name.clone().into()),
+        ])
+        .await;
+
+        {
+            let best_names_state = app.state.confirming_names.read().await;
+            if let Some(states) = best_names_state.get(&name) {
+                if let Some(state) = states.back() {
+                    return Ok(to.with(SuccessResponse::new(state.0.clone())));
+                }
+            }
+        }
+
+        Err(HTTPError::new(404, "not found".to_string()))
+    }
+
     pub async fn list_by_query(
         State(app): State<Arc<IndexerAPI>>,
         Extension(ctx): Extension<Arc<ReqContext>>,

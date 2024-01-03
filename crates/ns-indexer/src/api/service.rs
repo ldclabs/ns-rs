@@ -44,6 +44,40 @@ impl ServiceAPI {
         Ok(to.with(SuccessResponse::new(service_state.to_index()?)))
     }
 
+    pub async fn get_best(
+        State(app): State<Arc<IndexerAPI>>,
+        Extension(ctx): Extension<Arc<ReqContext>>,
+        to: PackObject<()>,
+        input: Query<QueryName>,
+    ) -> Result<PackObject<SuccessResponse<ServiceState>>, HTTPError> {
+        input.validate()?;
+        if input.code.is_none() {
+            return Err(HTTPError::new(400, "service code is required".to_string()));
+        }
+
+        let name = input.name.clone();
+        let code = input.code.unwrap() as u64;
+        ctx.set_kvs(vec![
+            ("action", "get_best_service_state".into()),
+            ("name", name.clone().into()),
+            ("code", code.into()),
+        ])
+        .await;
+
+        {
+            let best_names_state = app.state.confirming_names.read().await;
+            if let Some(states) = best_names_state.get(&name) {
+                for ss in states.iter().rev() {
+                    if ss.1.code == code {
+                        return Ok(to.with(SuccessResponse::new(ss.1.clone())));
+                    }
+                }
+            }
+        }
+
+        Err(HTTPError::new(404, "not found".to_string()))
+    }
+
     pub async fn list_by_name(
         State(app): State<Arc<IndexerAPI>>,
         Extension(ctx): Extension<Arc<ReqContext>>,

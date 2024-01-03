@@ -58,9 +58,9 @@ pub async fn version(
 
 pub async fn healthz(
     to: PackObject<()>,
-    State(api): State<Arc<IndexerAPI>>,
+    State(app): State<Arc<IndexerAPI>>,
 ) -> Result<PackObject<SuccessResponse<AppHealth>>, HTTPError> {
-    let last_accepted_state = api.state.last_accepted.read().await;
+    let last_accepted_state = app.state.last_accepted.read().await;
     let (block_height, height) = match *last_accepted_state {
         Some(ref last_accepted) => (last_accepted.block_height, last_accepted.height),
         None => (0, 0),

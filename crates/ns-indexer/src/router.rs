@@ -22,9 +22,19 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
             Router::new()
                 .route("/inscription", routing::get(api::InscriptionAPI::get_best))
                 .route(
+                    "/inscription/get_last",
+                    routing::get(api::InscriptionAPI::get_last_best),
+                )
+                .route(
+                    "/inscription/get_by_height",
+                    routing::get(api::InscriptionAPI::get_best_by_height),
+                )
+                .route(
                     "/inscription/list",
                     routing::get(api::InscriptionAPI::list_best),
                 )
+                .route("/name", routing::get(api::NameAPI::get_best))
+                .route("/service", routing::get(api::ServiceAPI::get_best))
                 .route("/utxo/list", routing::get(api::UtxoAPI::list)),
         )
         .nest(

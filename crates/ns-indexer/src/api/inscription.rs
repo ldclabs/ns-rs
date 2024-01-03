@@ -21,12 +21,12 @@ impl InscriptionAPI {
     pub async fn get_last_accepted(
         Extension(ctx): Extension<Arc<ReqContext>>,
         to: PackObject<()>,
-        State(api): State<Arc<IndexerAPI>>,
+        State(app): State<Arc<IndexerAPI>>,
     ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
         ctx.set("action", "get_last_accepted_inscription".into())
             .await;
 
-        let last_accepted_state = api.state.last_accepted.read().await;
+        let last_accepted_state = app.state.last_accepted.read().await;
 
         match last_accepted_state.clone() {
             Some(inscription) => Ok(to.with(SuccessResponse::new(inscription))),
@@ -34,17 +34,17 @@ impl InscriptionAPI {
         }
     }
 
-    pub async fn get_best(
+    pub async fn get_last_best(
         Extension(ctx): Extension<Arc<ReqContext>>,
         to: PackObject<()>,
-        State(api): State<Arc<IndexerAPI>>,
+        State(app): State<Arc<IndexerAPI>>,
     ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
-        ctx.set("action", "get_best_inscription".into()).await;
+        ctx.set("action", "get_last_best_inscription".into()).await;
 
-        let best_inscriptions_state = api.state.best_inscriptions.read().await;
+        let best_inscriptions_state = app.state.best_inscriptions.read().await;
         let mut inscription = best_inscriptions_state.back().cloned();
         if inscription.is_none() {
-            let last_accepted_state = api.state.last_accepted.read().await;
+            let last_accepted_state = app.state.last_accepted.read().await;
             inscription = last_accepted_state.clone();
         }
 
@@ -52,6 +52,83 @@ impl InscriptionAPI {
             Some(inscription) => Ok(to.with(SuccessResponse::new(inscription))),
             None => Err(HTTPError::new(404, "not found".to_string())),
         }
+    }
+
+    pub async fn get_best(
+        State(app): State<Arc<IndexerAPI>>,
+        Extension(ctx): Extension<Arc<ReqContext>>,
+        to: PackObject<()>,
+        input: Query<QueryName>,
+    ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
+        input.validate()?;
+        if input.sequence.is_none() {
+            return Err(HTTPError::new(400, "sequence is required".to_string()));
+        }
+
+        let name = input.name.clone();
+        let sequence = input.sequence.unwrap() as u64;
+        ctx.set_kvs(vec![
+            ("action", "get_best_inscription".into()),
+            ("name", name.clone().into()),
+            ("sequence", sequence.into()),
+        ])
+        .await;
+
+        {
+            let best_inscriptions_state = app.state.best_inscriptions.read().await;
+            for i in best_inscriptions_state.iter() {
+                if i.name == name && i.sequence == sequence {
+                    return Ok(to.with(SuccessResponse::new(i.clone())));
+                }
+            }
+        }
+
+        {
+            let last_accepted_state = app.state.last_accepted.read().await;
+            if let Some(ins) = last_accepted_state.as_ref() {
+                if ins.name == name && ins.sequence == sequence {
+                    return Ok(to.with(SuccessResponse::new(ins.clone())));
+                }
+            }
+        }
+
+        Err(HTTPError::new(404, "not found".to_string()))
+    }
+
+    pub async fn get_best_by_height(
+        State(app): State<Arc<IndexerAPI>>,
+        Extension(ctx): Extension<Arc<ReqContext>>,
+        to: PackObject<()>,
+        input: Query<QueryHeight>,
+    ) -> Result<PackObject<SuccessResponse<Inscription>>, HTTPError> {
+        input.validate()?;
+
+        let height = input.height;
+        ctx.set_kvs(vec![
+            ("action", "get_best_inscription_by_height".into()),
+            ("height", height.into()),
+        ])
+        .await;
+
+        {
+            let best_inscriptions_state = app.state.best_inscriptions.read().await;
+            for i in best_inscriptions_state.iter() {
+                if i.height == height as u64 {
+                    return Ok(to.with(SuccessResponse::new(i.clone())));
+                }
+            }
+        }
+
+        {
+            let last_accepted_state = app.state.last_accepted.read().await;
+            if let Some(ins) = last_accepted_state.as_ref() {
+                if ins.height == height as u64 {
+                    return Ok(to.with(SuccessResponse::new(ins.clone())));
+                }
+            }
+        }
+
+        Err(HTTPError::new(404, "not found".to_string()))
     }
 
     pub async fn get(
@@ -103,10 +180,10 @@ impl InscriptionAPI {
     pub async fn list_best(
         Extension(ctx): Extension<Arc<ReqContext>>,
         to: PackObject<()>,
-        State(api): State<Arc<IndexerAPI>>,
+        State(app): State<Arc<IndexerAPI>>,
     ) -> Result<PackObject<SuccessResponse<Vec<Inscription>>>, HTTPError> {
         ctx.set("action", "list_best_inscriptions".into()).await;
-        let best_inscriptions_state = api.state.best_inscriptions.read().await;
+        let best_inscriptions_state = app.state.best_inscriptions.read().await;
         Ok(to.with(SuccessResponse::new(
             best_inscriptions_state.iter().cloned().collect(),
         )))
