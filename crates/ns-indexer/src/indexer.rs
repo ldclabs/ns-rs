@@ -25,7 +25,7 @@ use crate::db::{
 use crate::envelope::Envelope;
 use crate::utxo::UTXO;
 
-const ACCEPTED_DISTANCE: u64 = 6; // 6 blocks before the best block
+const ACCEPTED_DISTANCE: u64 = 5; // 6 confirmations
 
 pub struct IndexerOptions {
     pub scylla: ScyllaDBOptions,

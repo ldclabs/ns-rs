@@ -66,6 +66,35 @@ impl NameAPI {
         Err(HTTPError::new(404, "not found".to_string()))
     }
 
+    pub async fn list_best_by_query(
+        State(app): State<Arc<IndexerAPI>>,
+        Extension(ctx): Extension<Arc<ReqContext>>,
+        to: PackObject<()>,
+        input: Query<QueryName>,
+    ) -> Result<PackObject<SuccessResponse<Vec<String>>>, HTTPError> {
+        input.validate()?;
+
+        let query = input.name.clone();
+        ctx.set_kvs(vec![
+            ("action", "list_best_names_by_query".into()),
+            ("query", query.clone().into()),
+        ])
+        .await;
+
+        let mut names: Vec<String> = Vec::new();
+
+        {
+            let best_names_state = app.state.confirming_names.read().await;
+            for n in best_names_state.keys() {
+                if n.starts_with(&query) {
+                    names.push(n.clone());
+                }
+            }
+        }
+
+        Ok(to.with(SuccessResponse::new(names)))
+    }
+
     pub async fn list_by_query(
         State(app): State<Arc<IndexerAPI>>,
         Extension(ctx): Extension<Arc<ReqContext>>,

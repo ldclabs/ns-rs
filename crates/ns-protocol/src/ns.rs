@@ -803,6 +803,16 @@ mod tests {
     }
 
     #[test]
+    fn check_greek_name() {
+        for name in &[
+            "α", "β", "γ", "δ", "ε", "ζ", "η", "θ", "ι", "κ", "λ", "μ", "ν", "ξ", "ο", "π", "ρ",
+            "ς", "σ", "τ", "υ", "φ", "χ", "ψ", "ω", "ϕ", "ϵ",
+        ] {
+            println!("{} is {}", name, valid_name(name))
+        }
+    }
+
+    #[test]
     fn signature_ser_de() {
         let sig = Signature(hex!("6b71fd0c8ae2ccc910c39dd20e76653fccca2638b7935f2312e954f5dccd71b209c58ca57e9d4fc2d3c06a57d585dbadf4535abb8a9cf103eeb9b9717d87f201").to_vec());
         let mut buf: Vec<u8> = Vec::new();

@@ -25,13 +25,13 @@ pub fn base64_encode(data: &[u8]) -> String {
 
 pub fn base64url_decode(data: &str) -> anyhow::Result<Vec<u8>> {
     general_purpose::URL_SAFE_NO_PAD
-        .decode(data)
+        .decode(data.trim_end_matches('='))
         .map_err(anyhow::Error::msg)
 }
 
 pub fn base64_decode(data: &str) -> anyhow::Result<Vec<u8>> {
-    general_purpose::STANDARD
-        .decode(data)
+    general_purpose::STANDARD_NO_PAD
+        .decode(data.trim_end_matches('='))
         .map_err(anyhow::Error::msg)
 }
 

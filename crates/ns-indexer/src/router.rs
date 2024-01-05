@@ -34,6 +34,10 @@ pub fn new(state: Arc<api::IndexerAPI>) -> Router {
                     routing::get(api::InscriptionAPI::list_best),
                 )
                 .route("/name", routing::get(api::NameAPI::get_best))
+                .route(
+                    "/name/list_by_query",
+                    routing::get(api::NameAPI::list_best_by_query),
+                )
                 .route("/service", routing::get(api::ServiceAPI::get_best))
                 .route("/utxo/list", routing::get(api::UtxoAPI::list)),
         )

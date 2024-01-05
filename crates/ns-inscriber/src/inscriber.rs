@@ -276,7 +276,7 @@ impl Inscriber {
     pub async fn collect_sats(
         &self,
         fee_rate: Amount,
-        unspent_txouts: &Vec<(SecretKey, UnspentTxOut)>,
+        unspent_txouts: &[(SecretKey, UnspentTxOut)],
         to: &Address<NetworkChecked>,
     ) -> anyhow::Result<Txid> {
         let amount = unspent_txouts.iter().map(|(_, v)| v.amount).sum::<Amount>();
@@ -327,7 +327,7 @@ impl Inscriber {
                 let sighash = sighasher
                     .taproot_key_spend_signature_hash(
                         0,
-                        &Prevouts::All(&vec![TxOut {
+                        &Prevouts::All(&[TxOut {
                             value: unspent_txout.amount,
                             script_pubkey: unspent_txout.script_pubkey.clone(),
                         }]),
@@ -613,9 +613,12 @@ impl Inscriber {
 
         let change_value = change_value
             .checked_sub(reveal_tx_fee)
-            .ok_or_else(|| anyhow::anyhow!("should compute commit_tx fee"))?;
-        if change_value <= dust_value {
-            anyhow::bail!("input value is too small");
+            .ok_or_else(|| anyhow::anyhow!("should compute reveal_tx fee"))?;
+        if change_value < dust_value {
+            anyhow::bail!(
+                "input value is too small, need another {} sats",
+                dust_value - change_value
+            );
         }
 
         reveal_tx.output[0].value = change_value;
@@ -866,7 +869,7 @@ mod tests {
                 &names,
                 fee_rate,
                 &keypair.secret_key(),
-                &unspent_txs.first().unwrap(),
+                unspent_txs.first().unwrap(),
             )
             .await
             .unwrap();
@@ -931,7 +934,7 @@ mod tests {
                 &names,
                 fee_rate,
                 &keypair.secret_key(),
-                &unspent_txs.first().unwrap(),
+                unspent_txs.first().unwrap(),
             )
             .await
             .unwrap();

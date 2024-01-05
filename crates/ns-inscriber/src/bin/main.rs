@@ -22,6 +22,7 @@ use ns_inscriber::{
 use ns_protocol::ns::{Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value};
 
 const AAD: &[u8; 12] = b"ns-inscriber";
+const TRANSFER_KEY_AAD: &[u8; 20] = b"ns:transfer.cose.key";
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -36,27 +37,43 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// generate a new KEK used to protect other keys
+    /// Generate a new KEK used to protect other keys
     NewKEK {
         /// alias for the new KEK key
         #[arg(short, long)]
         alias: String,
     },
-    /// generate a new Secp256k1 seed key that protected by KEK
-    Secp256k1Seed {},
-    /// generate a new Ed25519 seed key that protected by KEK
-    Ed25519Seed {},
-    /// Derive a Secp256k1 key from seed, it is protected by KEK.
-    /// Options Will be combined to "m/44'/0'/{acc}'/1'/{idx}" (BIP-32/44)
+    /// Generate a seed secret key that protected by KEK
+    NewSeed {},
+    /// Import a seed secret key and protected it by KEK
+    ImportSeed {
+        /// alias for the imported Seed key
+        #[arg(short, long)]
+        alias: String,
+    },
+    /// Export the seed key and protected it by a password
+    ExportSeed {
+        /// The seed key file name, will be combined to "{key}.cose.key" to read and export
+        #[arg(long, value_name = "FILE")]
+        seed: String,
+    },
+    /// Derive a Secp256k1 key from the seed, it is protected by KEK.
+    /// Options Will be combined to "m/44'/0'/{acc}'/1/{idx}" (BIP-32/44)
     Secp256k1Derive {
+        /// The seed key file name, will be combined to "{key}.cose.key" to read as seed key to derive
+        #[arg(long, value_name = "FILE", default_value = "seed")]
+        seed: String,
         #[arg(long, default_value_t = 0)]
         acc: u32,
         #[arg(long, default_value_t = 0)]
         idx: u32,
     },
-    /// Derive a Ed25519 key from seed, it is protected by KEK.
-    /// Options Will be combined to "m/42'/0'/{acc}'/1'/{idx}" (BIP-32/44)
+    /// Derive a Ed25519 key from the seed, it is protected by KEK.
+    /// Options Will be combined to "m/42'/0'/{acc}'/1/{idx}" (BIP-32/44)
     Ed25519Derive {
+        /// The seed key file name, will be combined to "{key}.cose.key" to read as seed key to derive
+        #[arg(long, value_name = "FILE", default_value = "seed")]
+        seed: String,
         #[arg(long, default_value_t = 0)]
         acc: u32,
         #[arg(long, default_value_t = 0)]
@@ -167,12 +184,10 @@ async fn main() -> anyhow::Result<()> {
     let network = Network::from_core_arg(&std::env::var("BITCOIN_NETWORK").unwrap_or_default())
         .unwrap_or(Network::Regtest);
 
-    println!("Bitcoin network: {}", network);
-
     match &cli.command {
         Some(Commands::NewKEK { alias }) => {
             let mut terminal = Terminal::open()?;
-            let password = terminal.prompt_sensitive("Enter a password to protect KEK")?;
+            let password = terminal.prompt_sensitive("Enter a password to protect KEK: ")?;
             let mkek = hash_256(password.as_bytes());
             let kid = if alias.is_empty() {
                 Local::now().to_rfc3339_opts(SecondsFormat::Secs, true)
@@ -187,32 +202,88 @@ async fn main() -> anyhow::Result<()> {
                 "Put this new KEK as INSCRIBER_KEK on config file:\n{}",
                 base64url_encode(&data)
             );
+            return Ok(());
         }
 
-        Some(Commands::Secp256k1Seed {}) => {
-            let file = keys_path.join("secp256k1-seed.cose.key");
+        Some(Commands::NewSeed {}) => {
+            let file = keys_path.join("seed.cose.key");
             if KekEncryptor::key_exists(&file) {
                 println!("{} exists, skipping key generation", file.display());
                 return Ok(());
             }
 
             let kek = KekEncryptor::open()?;
-            let secp = secp256k1::Secp256k1::new();
-            let keypair = secp256k1::new_secp256k1(&secp);
-            let (public_key, _parity) = keypair.x_only_public_key();
-            let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
-            let address: Address<NetworkChecked> =
-                Address::from_script(&script_pubkey, network).unwrap();
-            let key = Key::secp256k1_from_keypair(&keypair, address.to_string().as_bytes())?;
+            let signing_key = ed25519::new_ed25519();
+            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
+            let key = Key::ed25519_from_secret(signing_key.as_bytes(), address.as_bytes())?;
+            let key_id = key.key_id();
             kek.save_key(&file, key)?;
-            println!("key: {}, address: {}", file.display(), address);
+            println!(
+                "New seed key: {}, key id: {}",
+                file.display(),
+                String::from_utf8_lossy(&key_id)
+            );
             return Ok(());
         }
 
-        Some(Commands::Secp256k1Derive { acc, idx }) => {
+        Some(Commands::ImportSeed { alias }) => {
+            let kid = if alias.is_empty() {
+                Local::now().to_rfc3339_opts(SecondsFormat::Secs, true) + ".seed"
+            } else {
+                alias.to_owned()
+            };
+            let file = keys_path.join(format!("{kid}.cose.key"));
+            if KekEncryptor::key_exists(&file) {
+                println!("{} exists, skipping key generation", file.display());
+                return Ok(());
+            }
+
+            let key = {
+                let mut terminal = Terminal::open()?;
+                let import_key =
+                    terminal.prompt("Enter the seed key (base64url encoded) to import: ")?;
+                let password =
+                    terminal.prompt_sensitive("Enter the password that protected the seed: ")?;
+                let kek = hash_256(password.as_bytes());
+                let decryptor = Encrypt0::new(kek);
+                let ciphertext = base64url_decode(import_key.trim())?;
+                let key = decryptor.decrypt(unwrap_cbor_tag(&ciphertext), TRANSFER_KEY_AAD)?;
+                Key::from_slice(&key)?
+            };
+
             let kek = KekEncryptor::open()?;
-            let seed_key = kek.read_key(&keys_path.join("secp256k1-seed.cose.key"))?;
-            let kid = format!("m/44'/0'/{acc}'/1'/{idx}'");
+            let key_id = key.key_id();
+            kek.save_key(&file, key)?;
+            println!(
+                "Imported seed key: {}, key id: {}",
+                file.display(),
+                String::from_utf8_lossy(&key_id)
+            );
+            return Ok(());
+        }
+
+        Some(Commands::ExportSeed { seed }) => {
+            let key = {
+                let kek = KekEncryptor::open()?;
+                kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?
+            };
+            let key_id = key.key_id();
+            let mut terminal = Terminal::open()?;
+            let password = terminal.prompt_sensitive("Enter a password to protect the seed: ")?;
+            let kek = hash_256(password.as_bytes());
+            let encryptor = Encrypt0::new(kek);
+            let data = encryptor.encrypt(&key.to_vec()?, TRANSFER_KEY_AAD, &key_id)?;
+            let data = wrap_cbor_tag(&data);
+            let data = base64url_encode(&data);
+
+            println!("The exported seed key (base64url encoded):\n\n{data}\n\n");
+            return Ok(());
+        }
+
+        Some(Commands::Secp256k1Derive { seed, acc, idx }) => {
+            let kek = KekEncryptor::open()?;
+            let seed_key = kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?;
+            let kid = format!("m/44'/0'/{acc}'/1/{idx}");
             let path: DerivationPath = kid.parse()?;
             let secp = secp256k1::Secp256k1::new();
             let keypair =
@@ -231,26 +302,10 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
 
-        Some(Commands::Ed25519Seed {}) => {
-            let file = keys_path.join("ed25519-seed.cose.key");
-            if KekEncryptor::key_exists(&file) {
-                println!("{} exists, skipping key generation", file.display());
-                return Ok(());
-            }
-
+        Some(Commands::Ed25519Derive { seed, acc, idx }) => {
             let kek = KekEncryptor::open()?;
-            let signing_key = ed25519::new_ed25519();
-            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
-            let key = Key::ed25519_from_secret(signing_key.as_bytes(), address.as_bytes())?;
-            kek.save_key(&file, key)?;
-            println!("key: {}, public key: {}", file.display(), address);
-            return Ok(());
-        }
-
-        Some(Commands::Ed25519Derive { acc, idx }) => {
-            let kek = KekEncryptor::open()?;
-            let seed_key = kek.read_key(&keys_path.join("ed25519-seed.cose.key"))?;
-            let kid = format!("m/42'/0'/{acc}'/1'/{idx}'");
+            let seed_key = kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?;
+            let kid = format!("m/42'/0'/{acc}'/1/{idx}");
             let path: DerivationPath = kid.parse()?;
             let signing_key = ed25519::derive_ed25519(&seed_key.secret_key()?, &path);
             let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
@@ -383,6 +438,8 @@ async fn main() -> anyhow::Result<()> {
             amount,
             fee,
         }) => {
+            println!("Bitcoin network: {}", network);
+
             let txid: Txid = txid.parse()?;
             let to = Address::from_str(to)?.require_network(network)?;
             let amount = Amount::from_sat(*amount);
@@ -429,6 +486,8 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Some(Commands::Preview { fee, key, names }) => {
+            println!("Bitcoin network: {}", network);
+
             let fee_rate = Amount::from_sat(*fee);
             let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).collect();
             for name in &names {
@@ -504,6 +563,8 @@ async fn main() -> anyhow::Result<()> {
             key,
             names,
         }) => {
+            println!("Bitcoin network: {}", network);
+
             let fee_rate = Amount::from_sat(*fee);
             let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).collect();
             for name in &names {
@@ -576,7 +637,7 @@ async fn main() -> anyhow::Result<()> {
                     script_pubkey: txout.script_pubkey.clone(),
                 }
             } else {
-                let txout: UnspentTxOutJSON = serde_json::from_str(&txout_json)?;
+                let txout: UnspentTxOutJSON = serde_json::from_str(txout_json)?;
                 txout.to()?
             };
 
@@ -609,7 +670,7 @@ impl KekEncryptor {
         }
 
         let mut terminal = Terminal::open()?;
-        let password = terminal.prompt_sensitive("Enter a password to protect KEK: ")?;
+        let password = terminal.prompt_sensitive("Enter the password protected KEK: ")?;
         let mkek = hash_256(password.as_bytes());
         let decryptor = Encrypt0::new(mkek);
         let ciphertext = base64url_decode(kek_str.trim())?;
