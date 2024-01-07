@@ -710,19 +710,23 @@ mod tests {
     use ns_indexer::envelope::Envelope;
     use ns_protocol::{
         ed25519,
-        ns::{Operation, PublicKeyParams, Service, ThresholdLevel, Value},
+        ns::{Bytes32, Operation, PublicKeyParams, Service, ThresholdLevel, Value},
     };
 
     fn get_name(name: &str) -> Name {
-        let secret_key = hex!("7ef3811aabb916dc2f646ef1a371b90adec91bc07992cd4d44c156c42fc1b300");
-        let public_key = hex!("ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266");
+        let secret_key = Bytes32(hex!(
+            "7ef3811aabb916dc2f646ef1a371b90adec91bc07992cd4d44c156c42fc1b300"
+        ));
+        let public_key = Bytes32(hex!(
+            "ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266"
+        ));
         let params = PublicKeyParams {
-            public_keys: vec![public_key.to_vec()],
+            public_keys: vec![public_key],
             threshold: Some(1),
             kind: None,
         };
 
-        let signer = ed25519::SigningKey::try_from(&secret_key).unwrap();
+        let signer = ed25519::SigningKey::from_bytes(&secret_key.0);
         let signers = vec![signer];
 
         let mut name = Name {

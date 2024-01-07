@@ -20,7 +20,7 @@ pub struct Name {
     pub name: String,
     pub sequence: u64,
     pub service: Service,
-    pub signatures: Vec<Signature>,
+    pub signatures: Vec<Bytes64>,
 }
 
 #[derive(Clone, PartialEq, Debug, Default)]
@@ -45,15 +45,232 @@ impl core::default::Default for Operation {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
-pub struct Signature(pub Vec<u8>);
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct IntValue<'a>(pub &'a Value);
+impl<'a> IntValue<'a> {
+    fn to_int(&self) -> Result<ciborium::value::Integer, Error> {
+        self.0.as_integer().ok_or_else(|| {
+            Error::Custom(format!(
+                "IntValue: expected integer, got {}",
+                kind_of_value(self.0)
+            ))
+        })
+    }
+}
+
+impl TryFrom<&IntValue<'_>> for u64 {
+    type Error = Error;
+
+    fn try_from(value: &IntValue) -> Result<Self, Self::Error> {
+        u64::try_from(value.to_int()?)
+            .map_err(|err| Error::Custom(format!("IntValue: expected u64, error: {:?}", err)))
+    }
+}
+
+impl TryFrom<&IntValue<'_>> for u32 {
+    type Error = Error;
+
+    fn try_from(value: &IntValue) -> Result<Self, Self::Error> {
+        u32::try_from(value.to_int()?)
+            .map_err(|err| Error::Custom(format!("IntValue: expected u64, error: {:?}", err)))
+    }
+}
+
+impl TryFrom<&IntValue<'_>> for u16 {
+    type Error = Error;
+
+    fn try_from(value: &IntValue) -> Result<Self, Self::Error> {
+        u16::try_from(value.to_int()?)
+            .map_err(|err| Error::Custom(format!("IntValue: expected u64, error: {:?}", err)))
+    }
+}
+
+impl TryFrom<&IntValue<'_>> for u8 {
+    type Error = Error;
+
+    fn try_from(value: &IntValue) -> Result<Self, Self::Error> {
+        u8::try_from(value.to_int()?)
+            .map_err(|err| Error::Custom(format!("IntValue: expected u64, error: {:?}", err)))
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash, Default)]
+pub struct Bytes32(pub [u8; 32]);
+
+impl From<[u8; 32]> for Bytes32 {
+    fn from(value: [u8; 32]) -> Self {
+        Bytes32(value)
+    }
+}
+
+impl From<&[u8; 32]> for Bytes32 {
+    fn from(value: &[u8; 32]) -> Self {
+        Bytes32(value.to_owned())
+    }
+}
+
+impl From<&Bytes32> for Vec<u8> {
+    fn from(value: &Bytes32) -> Self {
+        value.to_vec()
+    }
+}
+
+impl From<Bytes32> for Vec<u8> {
+    fn from(value: Bytes32) -> Self {
+        value.to_vec()
+    }
+}
+
+impl TryFrom<&[u8]> for Bytes32 {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() != 32 {
+            Err(Error::Custom(format!(
+                "Bytes32: expected value length is 32, got {:?}",
+                value.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 32];
+            bytes.copy_from_slice(value);
+            Ok(Bytes32(bytes))
+        }
+    }
+}
+
+impl TryFrom<&Vec<u8>> for Bytes32 {
+    type Error = Error;
+    fn try_from(value: &Vec<u8>) -> Result<Self, Self::Error> {
+        Bytes32::try_from(value.as_slice())
+    }
+}
+
+impl TryFrom<Vec<u8>> for Bytes32 {
+    type Error = Error;
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Bytes32::try_from(value.as_slice())
+    }
+}
+
+impl Bytes32 {
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+
+    pub fn vec_into(values: &[Self]) -> Vec<Vec<u8>> {
+        values.iter().map(|v| v.to_vec()).collect()
+    }
+
+    pub fn vec_try_from(values: &[Vec<u8>]) -> Result<Vec<Self>, Error> {
+        values.iter().map(Bytes32::try_from).collect()
+    }
+
+    pub fn vec_try_from_value(value: &Value) -> Result<Vec<Self>, Error> {
+        value
+            .as_array()
+            .ok_or_else(|| {
+                Error::Custom(format!(
+                    "Bytes32: expected array, got {}",
+                    kind_of_value(value)
+                ))
+            })?
+            .iter()
+            .map(Bytes32::try_from)
+            .collect::<Result<Vec<Bytes32>, Error>>()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
+pub struct Bytes64(pub [u8; 64]);
+
+impl core::default::Default for Bytes64 {
+    fn default() -> Self {
+        Bytes64([0u8; 64])
+    }
+}
+
+impl From<[u8; 64]> for Bytes64 {
+    fn from(value: [u8; 64]) -> Self {
+        Bytes64(value)
+    }
+}
+
+impl From<&[u8; 64]> for Bytes64 {
+    fn from(value: &[u8; 64]) -> Self {
+        Bytes64(value.to_owned())
+    }
+}
+
+impl From<&Bytes64> for Vec<u8> {
+    fn from(value: &Bytes64) -> Self {
+        value.to_vec()
+    }
+}
+
+impl From<Bytes64> for Vec<u8> {
+    fn from(value: Bytes64) -> Self {
+        value.to_vec()
+    }
+}
+
+impl TryFrom<&[u8]> for Bytes64 {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() != 64 {
+            Err(Error::Custom(format!(
+                "Bytes64: expected value length is 64, got {:?}",
+                value.len()
+            )))
+        } else {
+            let mut bytes = [0u8; 64];
+            bytes.copy_from_slice(value);
+            Ok(Bytes64(bytes))
+        }
+    }
+}
+
+impl TryFrom<&Vec<u8>> for Bytes64 {
+    type Error = Error;
+    fn try_from(value: &Vec<u8>) -> Result<Self, Self::Error> {
+        Bytes64::try_from(value.as_slice())
+    }
+}
+
+impl Bytes64 {
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+
+    pub fn vec_into(values: &[Self]) -> Vec<Vec<u8>> {
+        values.iter().map(|v| v.to_vec()).collect()
+    }
+
+    pub fn vec_try_from(values: &[Vec<u8>]) -> Result<Vec<Self>, Error> {
+        values.iter().map(Bytes64::try_from).collect()
+    }
+
+    pub fn vec_try_from_value(value: &Value) -> Result<Vec<Self>, Error> {
+        value
+            .as_array()
+            .ok_or_else(|| {
+                Error::Custom(format!(
+                    "Bytes64: expected array, got {}",
+                    kind_of_value(value)
+                ))
+            })?
+            .iter()
+            .map(Bytes64::try_from)
+            .collect::<Result<Vec<Bytes64>, Error>>()
+    }
+}
 
 // PublicKeyParams is Ed25519 Multisignatures with threshold,
 // every public key can be FROST (Flexible Round-Optimised Schnorr Threshold signatures)
 // see: https://github.com/ZcashFoundation/frost
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct PublicKeyParams {
-    pub public_keys: Vec<Vec<u8>>,
+    pub public_keys: Vec<Bytes32>,
     pub threshold: Option<u8>, // default to public_keys.len()
     pub kind: Option<u8>,      // default to 0: ed25519
 }
@@ -74,14 +291,7 @@ impl PublicKeyParams {
                 "PublicKeyParams: expected at least one public key".to_string(),
             ));
         }
-        for pk in self.public_keys.iter() {
-            if pk.len() != 32 {
-                return Err(Error::Custom(format!(
-                    "PublicKeyParams: expected key length is 32, got {:?}",
-                    pk.len()
-                )));
-            }
-        }
+
         if let Some(threshold) = self.threshold {
             if threshold == 0 {
                 return Err(Error::Custom(
@@ -249,14 +459,6 @@ impl Name {
         if self.signatures.is_empty() {
             return Err(Error::Custom("Name: missing signatures".to_string()));
         }
-        for sig in self.signatures.iter() {
-            if sig.0.len() != 64 {
-                return Err(Error::Custom(format!(
-                    "Name: expected signature length is 64, got {:?}",
-                    sig.0.len()
-                )));
-            }
-        }
 
         let mut signatures = self.signatures.clone();
         signatures.dedup();
@@ -278,15 +480,14 @@ impl Name {
         let data = self.to_sign_bytes()?;
         let mut keys: Vec<ed25519::VerifyingKey> = Vec::with_capacity(params.public_keys.len());
         for pk in &params.public_keys {
-            let key = ed25519::VerifyingKey::try_from(pk.as_slice())
+            let key = ed25519::VerifyingKey::from_bytes(&pk.0)
                 .map_err(|err| Error::Custom(err.to_string()))?;
             keys.push(key);
         }
 
         let mut count = 0;
         for sig in self.signatures.iter() {
-            let sig = ed25519::Signature::from_slice(&sig.0)
-                .map_err(|err| Error::Custom(err.to_string()))?;
+            let sig = ed25519::Signature::from_bytes(&sig.0);
             for key in keys.iter() {
                 if key.verify_strict(&data, &sig).is_ok() {
                     count += 1;
@@ -324,9 +525,9 @@ impl Name {
         for pk in params.public_keys.iter() {
             if let Some(signer) = signers
                 .iter()
-                .find(|sk| sk.verifying_key().as_bytes().as_slice() == pk)
+                .find(|sk| sk.verifying_key().as_bytes() == &pk.0)
             {
-                let sig = Signature(signer.sign(&data).to_bytes().to_vec());
+                let sig = Bytes64::from(signer.sign(&data).to_bytes());
                 self.signatures.push(sig);
                 if self.signatures.len() == threshold as usize {
                     break;
@@ -347,26 +548,28 @@ impl Name {
 
     pub fn sign_with(&mut self, signer: &ed25519::SigningKey) -> Result<(), Error> {
         let data = self.to_sign_bytes()?;
-        let sig = Signature(signer.sign(&data).to_bytes().to_vec());
+        let sig = Bytes64::from(signer.sign(&data).to_bytes());
         self.signatures.push(sig);
         Ok(())
     }
 }
 
-impl From<&Signature> for Value {
-    fn from(signature: &Signature) -> Self {
-        Value::Bytes(signature.0.clone())
+impl From<&Bytes32> for Value {
+    fn from(val: &Bytes32) -> Self {
+        Value::Bytes(val.to_vec())
+    }
+}
+
+impl From<&Bytes64> for Value {
+    fn from(val: &Bytes64) -> Self {
+        Value::Bytes(val.to_vec())
     }
 }
 
 impl From<&PublicKeyParams> for Value {
     fn from(params: &PublicKeyParams) -> Self {
         let mut arr = vec![Value::Array(
-            params
-                .public_keys
-                .iter()
-                .map(|pk| Value::Bytes(pk.clone()))
-                .collect(),
+            params.public_keys.iter().map(Value::from).collect(),
         )];
         if let Some(threshold) = params.threshold {
             arr.push(Value::Integer(threshold.into()));
@@ -411,25 +614,28 @@ impl From<&Name> for Value {
     }
 }
 
-impl TryFrom<&Value> for Signature {
+impl TryFrom<&Value> for Bytes32 {
     type Error = Error;
 
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         match value {
-            Value::Bytes(bytes) => {
-                if bytes.len() != 64 {
-                    Err(Error::Custom(format!(
-                        "Signature: expected value length is 64, got {:?}",
-                        bytes.len()
-                    )))
-                } else {
-                    let mut value = Vec::with_capacity(64);
-                    value.extend(bytes);
-                    Ok(Signature(value))
-                }
-            }
+            Value::Bytes(bytes) => Bytes32::try_from(bytes),
             _ => Err(Error::Custom(format!(
-                "Signature: expected bytes, got {}",
+                "Bytes32: expected bytes, got {}",
+                kind_of_value(value)
+            ))),
+        }
+    }
+}
+
+impl TryFrom<&Value> for Bytes64 {
+    type Error = Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::Bytes(bytes) => Bytes64::try_from(bytes),
+            _ => Err(Error::Custom(format!(
+                "Bytes64: expected bytes, got {}",
                 kind_of_value(value)
             ))),
         }
@@ -449,18 +655,7 @@ impl TryFrom<&Value> for Operation {
                 }
 
                 Ok(Operation {
-                    subcode: arr[0]
-                        .as_integer()
-                        .ok_or_else(|| {
-                            Error::Custom(format!(
-                                "Operation: expected integer, got {}",
-                                kind_of_value(&arr[0])
-                            ))
-                        })?
-                        .try_into()
-                        .map_err(|err| {
-                            Error::Custom(format!("Operation: expected u32, error, {:?}", err))
-                        })?,
+                    subcode: u16::try_from(&IntValue(&arr[0]))?,
                     params: arr[1].clone(),
                 })
             }
@@ -484,18 +679,7 @@ impl TryFrom<&Value> for Service {
         match arr.len() {
             v if v == 2 || v == 3 => {
                 let mut srv = Service {
-                    code: arr[0]
-                        .as_integer()
-                        .ok_or_else(|| {
-                            Error::Custom(format!(
-                                "Service: expected integer, got {}",
-                                kind_of_value(&arr[0])
-                            ))
-                        })?
-                        .try_into()
-                        .map_err(|err| {
-                            Error::Custom(format!("Service: expected u32, error: {:?}", err))
-                        })?,
+                    code: u64::try_from(&IntValue(&arr[0]))?,
                     operations: arr[1]
                         .as_array()
                         .ok_or_else(|| {
@@ -540,56 +724,17 @@ impl TryFrom<&Value> for PublicKeyParams {
         match arr.len() {
             v if (1..=3).contains(&v) => {
                 let mut params = PublicKeyParams {
-                    public_keys: arr[0]
-                        .as_array()
-                        .ok_or_else(|| {
-                            Error::Custom(format!(
-                                "PublicKeyParams: expected array, got {}",
-                                kind_of_value(&arr[0])
-                            ))
-                        })?
-                        .iter()
-                        .map(|pk| {
-                            pk.as_bytes().map(|v| v.to_owned()).ok_or_else(|| {
-                                Error::Custom(format!(
-                                    "PublicKeyParams: expected bytes, got {}",
-                                    kind_of_value(pk)
-                                ))
-                            })
-                        })
-                        .collect::<Result<Vec<Vec<u8>>, Error>>()?,
+                    public_keys: Bytes32::vec_try_from_value(&arr[0])?,
                     threshold: None,
                     kind: None,
                 };
                 if v >= 2 {
-                    let threshold = arr[1]
-                        .as_integer()
-                        .ok_or_else(|| {
-                            Error::Custom(format!(
-                                "PublicKeyParams: expected integer, got {}",
-                                kind_of_value(&arr[1])
-                            ))
-                        })?
-                        .try_into()
-                        .map_err(|err| {
-                            Error::Custom(format!("PublicKeyParams: expected u8, error: {:?}", err))
-                        })?;
+                    let threshold = u8::try_from(&IntValue(&arr[1]))?;
                     params.threshold = Some(threshold);
                 }
 
                 if v == 3 {
-                    let kind = arr[2]
-                        .as_integer()
-                        .ok_or_else(|| {
-                            Error::Custom(format!(
-                                "PublicKeyParams: expected integer, got {}",
-                                kind_of_value(&arr[2])
-                            ))
-                        })?
-                        .try_into()
-                        .map_err(|err| {
-                            Error::Custom(format!("PublicKeyParams: expected u8, error: {:?}", err))
-                        })?;
+                    let kind = u8::try_from(&IntValue(&arr[2]))?;
                     params.kind = Some(kind);
                 }
                 Ok(params)
@@ -622,30 +767,9 @@ impl TryFrom<&Value> for Name {
                         ))
                     })?
                     .to_string(),
-                sequence: arr[1]
-                    .as_integer()
-                    .ok_or_else(|| {
-                        Error::Custom(format!(
-                            "Name: expected integer, got {}",
-                            kind_of_value(&arr[1])
-                        ))
-                    })?
-                    .try_into()
-                    .map_err(|err| {
-                        Error::Custom(format!("Name: expected u64, error: {:?}", err))
-                    })?,
+                sequence: u64::try_from(&IntValue(&arr[1]))?,
                 service: Service::try_from(&arr[2])?,
-                signatures: arr[3]
-                    .as_array()
-                    .ok_or_else(|| {
-                        Error::Custom(format!(
-                            "Name: expected array, got {}",
-                            kind_of_value(&arr[3])
-                        ))
-                    })?
-                    .iter()
-                    .map(Signature::try_from)
-                    .collect::<Result<Vec<Signature>, Self::Error>>()?,
+                signatures: Bytes64::vec_try_from_value(&arr[3])?,
             }),
             _ => Err(Error::Custom(format!(
                 "Name: expected array of length 4, got {}",
@@ -655,7 +779,7 @@ impl TryFrom<&Value> for Name {
     }
 }
 
-impl Serialize for Signature {
+impl Serialize for Bytes32 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: ser::Serializer,
@@ -664,13 +788,32 @@ impl Serialize for Signature {
     }
 }
 
-impl<'de> Deserialize<'de> for Signature {
-    fn deserialize<D>(deserializer: D) -> Result<Signature, D::Error>
+impl<'de> Deserialize<'de> for Bytes32 {
+    fn deserialize<D>(deserializer: D) -> Result<Bytes32, D::Error>
     where
         D: de::Deserializer<'de>,
     {
         let val = Value::deserialize(deserializer)?;
-        Signature::try_from(&val).map_err(de::Error::custom)
+        Bytes32::try_from(&val).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for Bytes64 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for Bytes64 {
+    fn deserialize<D>(deserializer: D) -> Result<Bytes64, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        Bytes64::try_from(&val).map_err(de::Error::custom)
     }
 }
 
@@ -731,7 +874,7 @@ impl<'de> Deserialize<'de> for Name {
     }
 }
 
-fn kind_of_value(v: &Value) -> String {
+pub(crate) fn kind_of_value(v: &Value) -> String {
     match v {
         Value::Integer(_) => "integer".to_string(),
         Value::Bytes(_) => "bytes".to_string(),
@@ -814,26 +957,30 @@ mod tests {
 
     #[test]
     fn signature_ser_de() {
-        let sig = Signature(hex!("6b71fd0c8ae2ccc910c39dd20e76653fccca2638b7935f2312e954f5dccd71b209c58ca57e9d4fc2d3c06a57d585dbadf4535abb8a9cf103eeb9b9717d87f201").to_vec());
+        let sig = Bytes64(hex!("6b71fd0c8ae2ccc910c39dd20e76653fccca2638b7935f2312e954f5dccd71b209c58ca57e9d4fc2d3c06a57d585dbadf4535abb8a9cf103eeb9b9717d87f201"));
         let mut buf: Vec<u8> = Vec::new();
         into_writer(&sig, &mut buf).unwrap();
         assert_eq!(buf.len(), 66);
         assert_eq!(buf[0], 0x58); // byte string
         assert_eq!(buf[1], 0x40); // 64 bytes
-        let sig2: Signature = from_reader(&buf[..]).unwrap();
+        let sig2: Bytes64 = from_reader(&buf[..]).unwrap();
         assert_eq!(sig, sig2);
     }
 
     #[test]
     fn name_ser_de() {
-        let secret_key = hex!("7ef3811aabb916dc2f646ef1a371b90adec91bc07992cd4d44c156c42fc1b300");
-        let public_key = hex!("ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266");
+        let secret_key = Bytes32(hex!(
+            "7ef3811aabb916dc2f646ef1a371b90adec91bc07992cd4d44c156c42fc1b300"
+        ));
+        let public_key = Bytes32(hex!(
+            "ee90735ac719e85dc2f3e5974036387fdf478af7d9d1f8480e97eee601890266"
+        ));
         let params = PublicKeyParams {
-            public_keys: vec![public_key.to_vec()],
+            public_keys: vec![public_key],
             threshold: Some(1),
             kind: None,
         };
-        let signer = ed25519::SigningKey::try_from(&secret_key).unwrap();
+        let signer = ed25519::SigningKey::from_bytes(&secret_key.0);
         assert!(params.validate().is_ok());
 
         let mut name = Name {
@@ -857,8 +1004,8 @@ mod tests {
         assert!(name.verify(&params, ThresholdLevel::Default).is_ok());
         assert!(name.verify(&params, ThresholdLevel::Strict).is_ok());
         assert!(name.verify(&params, ThresholdLevel::All).is_ok());
-        assert_eq!(name.signatures, vec![Signature(
-            hex!("e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c").to_vec(),
+        assert_eq!(name.signatures, vec![Bytes64(
+            hex!("e23554d996647e86f69115d04515398cc7463062d2683b099371360e93fa1cba02351492b70ef31037baa7780053bcf20b12bafe9531ee17fe140b93082a3f0c")
         )]);
 
         let data = name.to_bytes().unwrap();
@@ -889,10 +1036,10 @@ mod tests {
 
         let params = PublicKeyParams {
             public_keys: vec![
-                s1.verifying_key().as_bytes().to_vec(),
-                s2.verifying_key().as_bytes().to_vec(),
-                s3.verifying_key().as_bytes().to_vec(),
-                s4.verifying_key().as_bytes().to_vec(),
+                s1.verifying_key().as_bytes().into(),
+                s2.verifying_key().as_bytes().into(),
+                s3.verifying_key().as_bytes().into(),
+                s4.verifying_key().as_bytes().into(),
             ],
             threshold: Some(2),
             kind: None,

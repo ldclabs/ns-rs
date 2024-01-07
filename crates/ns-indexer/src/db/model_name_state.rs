@@ -3,7 +3,7 @@ use ns_scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use ns_scylla_orm_macros::CqlOrm;
 use std::collections::{BTreeMap, HashSet};
 
-use ns_protocol::state;
+use ns_protocol::{ns::Bytes32, state};
 
 use crate::db::scylladb;
 
@@ -57,8 +57,8 @@ impl NameState {
             expire_time: value.expire_time as i64,
             threshold: value.threshold as i8,
             key_kind: value.key_kind as i8,
-            public_keys: value.public_keys.clone(),
-            next_public_keys: value.next_public_keys.as_ref().unwrap_or(&vec![]).clone(),
+            public_keys: Bytes32::vec_into(&value.public_keys),
+            next_public_keys: Bytes32::vec_into(value.next_public_keys.as_ref().unwrap_or(&vec![])),
             _fields: Self::fields(),
         })
     }
@@ -73,11 +73,11 @@ impl NameState {
             expire_time: self.expire_time as u64,
             threshold: self.threshold as u8,
             key_kind: self.key_kind as u8,
-            public_keys: self.public_keys.clone(),
+            public_keys: Bytes32::vec_try_from(&self.public_keys)?,
             next_public_keys: if self.next_public_keys.is_empty() {
                 None
             } else {
-                Some(self.next_public_keys.clone())
+                Some(Bytes32::vec_try_from(&self.next_public_keys)?)
             },
         })
     }
@@ -211,7 +211,7 @@ impl NameState {
 
     pub async fn batch_remove_pubkey_names(
         db: &scylladb::ScyllaDB,
-        pubkey_names: HashSet<(Vec<u8>, String)>,
+        pubkey_names: HashSet<(Bytes32, String)>,
     ) -> anyhow::Result<()> {
         let mut statements: Vec<&str> = Vec::with_capacity(pubkey_names.len());
         let mut values: Vec<(Vec<u8>, String)> = Vec::with_capacity(pubkey_names.len());
@@ -220,7 +220,7 @@ impl NameState {
         let query = "DELETE FROM pubkey_name WHERE pubk=? AND name=?";
         for state in pubkey_names {
             statements.push(query);
-            values.push((state.0, state.1));
+            values.push((state.0.to_vec(), state.1));
         }
         let _ = db
             .batch(scylladb::BatchType::Unlogged, statements, values)
@@ -230,7 +230,7 @@ impl NameState {
 
     pub async fn batch_add_pubkey_names(
         db: &scylladb::ScyllaDB,
-        pubkey_names: HashSet<(Vec<u8>, String)>,
+        pubkey_names: HashSet<(Bytes32, String)>,
     ) -> anyhow::Result<()> {
         let mut statements: Vec<&str> = Vec::with_capacity(pubkey_names.len());
         let mut values: Vec<(Vec<u8>, String)> = Vec::with_capacity(pubkey_names.len());
@@ -250,7 +250,7 @@ impl NameState {
         );
         for state in pubkey_names {
             statements.push(query.as_str());
-            values.push((state.0, state.1));
+            values.push((state.0.to_vec(), state.1));
         }
         let _ = db
             .batch(scylladb::BatchType::Unlogged, statements, values)
@@ -283,15 +283,12 @@ impl NameState {
 
     pub async fn list_by_pubkey(
         db: &scylladb::ScyllaDB,
-        pubkey: Vec<u8>,
+        pubkey: Bytes32,
     ) -> anyhow::Result<Vec<String>> {
         let fields = vec!["name".to_string()];
-        if pubkey.len() != 32 {
-            return Ok(vec![]);
-        }
 
         let query = "SELECT name FROM pubkey_name WHERE pubkey=?";
-        let params = (pubkey,);
+        let params = (pubkey.to_vec(),);
         let rows = db.execute_iter(query, params).await?;
 
         let mut res: Vec<PubkeyName> = Vec::with_capacity(rows.len());

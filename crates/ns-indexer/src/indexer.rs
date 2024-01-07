@@ -11,7 +11,7 @@ use tokio::{
 };
 
 use ns_protocol::{
-    ns::{Name, PublicKeyParams, ThresholdLevel},
+    ns::{self, Bytes32, Name, PublicKeyParams, ThresholdLevel},
     state::{
         hash_sha3, Inscription, InvalidInscription, NameState, ServiceProtocol, ServiceState,
         NAME_EXPIRE_SECONDS, NAME_STALE_SECONDS,
@@ -201,15 +201,15 @@ impl Indexer {
                         let mut inscription = Inscription {
                             name: name.name.clone(),
                             sequence: name.sequence,
-                            height: 0,
-                            name_height: 0,
-                            previous_hash: vec![],
+                            height: 1,
+                            name_height: 1,
+                            previous_hash: Bytes32::default(),
                             name_hash: name_state_hash,
                             service_hash: service_state_hash,
                             protocol_hash: service_protocol_hash,
-                            block_hash: block_hash.to_byte_array().to_vec(),
+                            block_hash: block_hash.to_byte_array().into(),
                             block_height,
-                            txid: envelope.txid.to_byte_array().to_vec(),
+                            txid: envelope.txid.to_byte_array().into(),
                             vin: envelope.vin,
                             data: name,
                         };
@@ -242,10 +242,7 @@ impl Indexer {
                                             .expect("hash_sha3(inscription) should not fail");
                                     }
                                     None => {
-                                        // this is the first inscription
-                                        inscription.height = 1;
-                                        inscription.name_height = 1;
-                                        inscription.previous_hash = [0u8; 32].to_vec();
+                                        // this is the first inscription, no thing to do
                                     }
                                 },
                             }
@@ -272,7 +269,7 @@ impl Indexer {
         block_height: u64,
         block_time: u64,
         name: &Name,
-    ) -> anyhow::Result<(Vec<u8>, Vec<u8>, Option<Vec<u8>>)> {
+    ) -> anyhow::Result<(Bytes32, Bytes32, Option<Bytes32>)> {
         name.validate()?;
         // default protocol is Name service
         let mut service_protocol = ServiceProtocol::default();
@@ -491,11 +488,11 @@ impl Indexer {
         }
 
         let mut fresh_name_index: BTreeMap<String, u64> = BTreeMap::new();
-        let mut fresh_name_with_public_keys: HashSet<(String, Vec<Vec<u8>>)> = HashSet::new();
-        let mut captured_name_with_public_keys: HashSet<(String, Vec<Vec<u8>>)> = HashSet::new();
-        let mut stale_name_with_public_keys: HashSet<(String, Vec<Vec<u8>>)> = HashSet::new();
-        let mut fresh_pubkey_names: HashSet<(Vec<u8>, String)> = HashSet::new();
-        let mut stale_pubkey_names: HashSet<(Vec<u8>, String)> = HashSet::new();
+        let mut fresh_name_with_public_keys: HashSet<(String, Vec<Bytes32>)> = HashSet::new();
+        let mut captured_name_with_public_keys: HashSet<(String, Vec<Bytes32>)> = HashSet::new();
+        let mut stale_name_with_public_keys: HashSet<(String, Vec<Bytes32>)> = HashSet::new();
+        let mut fresh_pubkey_names: HashSet<(Bytes32, String)> = HashSet::new();
+        let mut stale_pubkey_names: HashSet<(Bytes32, String)> = HashSet::new();
         if !inscriptions.is_empty() {
             for name in &name_states {
                 fresh_name_index.insert(name.name.clone(), name.block_time);
@@ -508,7 +505,13 @@ impl Indexer {
             )
             .await?;
             for npk in npks {
-                captured_name_with_public_keys.insert((npk.name.clone(), npk.public_keys.clone()));
+                captured_name_with_public_keys.insert((
+                    npk.name.clone(),
+                    npk.public_keys
+                        .iter()
+                        .map(Bytes32::try_from)
+                        .collect::<anyhow::Result<Vec<Bytes32>, ns::Error>>()?,
+                ));
             }
             for npk in &captured_name_with_public_keys {
                 if fresh_name_with_public_keys.contains(npk) {

@@ -10,7 +10,7 @@ use ns_axum_web::{
     erring::{HTTPError, SuccessResponse},
     object::PackObject,
 };
-use ns_protocol::state::NameState;
+use ns_protocol::{ns, state::NameState};
 
 use crate::api::{IndexerAPI, QueryName, QueryPubkey};
 use crate::db;
@@ -130,10 +130,12 @@ impl NameAPI {
         };
         let pubkey = hex::decode(key)
             .map_err(|_| HTTPError::new(400, format!("Invalid pubkey: {}", input.pubkey)))?;
+        let pubkey =
+            ns::Bytes32::try_from(&pubkey).map_err(|e| HTTPError::new(400, e.to_string()))?;
         ctx.set_kvs(vec![("action", "list_names_by_pubkey".into())])
             .await;
 
-        let mut names = db::NameState::list_by_pubkey(&app.scylla, pubkey.to_vec()).await?;
+        let mut names = db::NameState::list_by_pubkey(&app.scylla, pubkey).await?;
         names.sort();
         Ok(to.with(SuccessResponse::new(names)))
     }

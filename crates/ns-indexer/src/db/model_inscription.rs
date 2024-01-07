@@ -2,7 +2,7 @@ use ns_axum_web::erring::HTTPError;
 use ns_scylla_orm::{ColumnsMap, CqlValue, ToCqlVal};
 use ns_scylla_orm_macros::CqlOrm;
 
-use ns_protocol::state;
+use ns_protocol::{ns::Bytes32, state};
 
 use crate::db::{self, scylladb, scylladb::filter_single_row_err};
 
@@ -150,13 +150,17 @@ impl Inscription {
             sequence: value.sequence as i64,
             height: value.height as i64,
             name_height: value.name_height as i64,
-            previous_hash: value.previous_hash.clone(),
-            name_hash: value.name_hash.clone(),
-            service_hash: value.service_hash.clone(),
-            protocol_hash: value.protocol_hash.as_ref().unwrap_or(&vec![]).clone(),
-            block_hash: value.block_hash.clone(),
+            previous_hash: (&value.previous_hash).into(),
+            name_hash: (&value.name_hash).into(),
+            service_hash: (&value.service_hash).into(),
+            protocol_hash: value
+                .protocol_hash
+                .as_ref()
+                .map(|v| v.into())
+                .unwrap_or_default(),
+            block_hash: (&value.block_hash).into(),
             block_height: value.block_height as i64,
-            txid: value.txid.clone(),
+            txid: (&value.txid).into(),
             vin: value.vin as i8,
             data,
             _fields: Self::fields(),
@@ -170,28 +174,28 @@ impl Inscription {
             sequence: self.sequence as u64,
             height: self.height as u64,
             name_height: self.name_height as u64,
-            previous_hash: self.previous_hash.clone(),
-            name_hash: self.name_hash.clone(),
-            service_hash: self.service_hash.clone(),
+            previous_hash: (&self.previous_hash).try_into()?,
+            name_hash: (&self.name_hash).try_into()?,
+            service_hash: (&self.service_hash).try_into()?,
             protocol_hash: if self.protocol_hash.is_empty() {
                 None
             } else {
-                Some(self.protocol_hash.clone())
+                Some((&self.protocol_hash).try_into()?)
             },
-            block_hash: self.block_hash.clone(),
+            block_hash: (&self.block_hash).try_into()?,
             block_height: self.block_height as u64,
-            txid: self.txid.clone(),
+            txid: (&self.txid).try_into()?,
             vin: self.vin as u8,
             data,
         })
     }
 
-    pub fn to_checkpoint(&self, hash: Vec<u8>) -> anyhow::Result<Checkpoint> {
+    pub fn to_checkpoint(&self, hash: Bytes32) -> anyhow::Result<Checkpoint> {
         Ok(Checkpoint {
             checkpoint: Checkpoint::LAST_ACCEPTED.to_string(),
             block_height: self.block_height,
             height: self.height,
-            hash,
+            hash: hash.into(),
             name: self.name.clone(),
             sequence: self.sequence,
             _fields: Checkpoint::fields(),
@@ -510,7 +514,7 @@ impl InvalidInscription {
         Ok(Self {
             name: value.name.clone(),
             block_height: value.block_height as i64,
-            hash: value.hash.clone(),
+            hash: (&value.hash).into(),
             reason: value.reason.clone(),
             data,
             _fields: Self::fields(),
@@ -522,7 +526,7 @@ impl InvalidInscription {
         Ok(state::InvalidInscription {
             name: self.name.clone(),
             block_height: self.block_height as u64,
-            hash: self.hash.clone(),
+            hash: (&self.hash).try_into()?,
             reason: self.reason.clone(),
             data,
         })

@@ -19,7 +19,7 @@ use ns_inscriber::{
         secp256k1, unwrap_cbor_tag, wrap_cbor_tag, DerivationPath, Encrypt0, Key,
     },
 };
-use ns_protocol::ns::{Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value};
+use ns_protocol::ns::{Bytes32, Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value};
 
 const AAD: &[u8; 12] = b"ns-inscriber";
 const TRANSFER_KEY_AAD: &[u8; 20] = b"ns:transfer.cose.key";
@@ -506,7 +506,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
             let params = PublicKeyParams {
-                public_keys: vec![signing_key.verifying_key().to_bytes().to_vec()],
+                public_keys: vec![Bytes32(signing_key.verifying_key().to_bytes().to_owned())],
                 threshold: None,
                 kind: None,
             };
@@ -583,7 +583,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
             let params = PublicKeyParams {
-                public_keys: vec![signing_key.verifying_key().to_bytes().to_vec()],
+                public_keys: vec![Bytes32(signing_key.verifying_key().to_bytes().to_owned())],
                 threshold: None,
                 kind: None,
             };

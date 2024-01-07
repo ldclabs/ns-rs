@@ -36,6 +36,7 @@ pub fn fetch_desc(
 
             head_height -= 1;
             let inscription: Inscription = cli.get_inscription_by_height(head_height).await?;
+
             if head_inscription.previous_hash != inscription.hash()? {
                 Err(anyhow::anyhow!("inscription({}): previous hash mismatch", inscription.height))?;
             }

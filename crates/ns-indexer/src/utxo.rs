@@ -17,7 +17,7 @@ impl UTXO {
             .input
             .iter()
             .map(|txin| UTXO {
-                txid: txin.previous_output.txid.to_byte_array().to_vec(),
+                txid: txin.previous_output.txid.to_byte_array().into(),
                 vout: txin.previous_output.vout,
                 amount: 0,
             })

@@ -1,16 +1,18 @@
-use ciborium::{from_reader, into_writer};
-use serde::{de, Deserialize, Serialize};
+use ciborium::{from_reader, into_writer, Value};
+use serde::{de, ser, Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use std::{borrow::BorrowMut, fmt::Debug};
 
-use crate::ns::{Error, Name, PublicKeyParams, Service, ThresholdLevel, Value};
+use crate::ns::{
+    kind_of_value, Bytes32, Error, IntValue, Name, PublicKeyParams, Service, ThresholdLevel,
+};
 
 // After the silence period exceeds 365 days, the name is invalid, the application validation signature should be invalid, and the original registrant can activate the name with any update.
 pub const NAME_STALE_SECONDS: u64 = 60 * 60 * 24 * 365;
 // After the silence period exceeds 365 + 180 days, others are allowed to re-register the name, if no one registers, the original registrant can activate the name with any update
 pub const NAME_EXPIRE_SECONDS: u64 = NAME_STALE_SECONDS + 60 * 60 * 24 * 180;
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct NameState {
     pub name: String,
     pub sequence: u64,
@@ -20,9 +22,73 @@ pub struct NameState {
     pub expire_time: u64,
     pub threshold: u8,
     pub key_kind: u8,
-    pub public_keys: Vec<Vec<u8>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub next_public_keys: Option<Vec<Vec<u8>>>,
+    pub public_keys: Vec<Bytes32>,
+    pub next_public_keys: Option<Vec<Bytes32>>,
+}
+
+impl From<&NameState> for Value {
+    fn from(state: &NameState) -> Self {
+        let mut arr = vec![
+            Value::from(state.name.clone()),
+            Value::from(state.sequence),
+            Value::from(state.block_height),
+            Value::from(state.block_time),
+            Value::from(state.stale_time),
+            Value::from(state.expire_time),
+            Value::from(state.threshold),
+            Value::from(state.key_kind),
+            Value::Array(state.public_keys.iter().map(Value::from).collect()),
+        ];
+        if let Some(keys) = state.next_public_keys.as_ref() {
+            arr.push(Value::Array(keys.iter().map(Value::from).collect()));
+        }
+        Value::Array(arr)
+    }
+}
+
+impl TryFrom<&Value> for NameState {
+    type Error = Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let arr = value.as_array().ok_or_else(|| {
+            Error::Custom(format!(
+                "NameState: expected array, got {}",
+                kind_of_value(value)
+            ))
+        })?;
+        match arr.len() {
+            9 | 10 => {
+                let mut state = NameState {
+                    name: arr[0]
+                        .as_text()
+                        .ok_or_else(|| {
+                            Error::Custom(format!(
+                                "NameState: expected string, got {}",
+                                kind_of_value(&arr[0])
+                            ))
+                        })?
+                        .to_string(),
+                    sequence: u64::try_from(&IntValue(&arr[1]))?,
+                    block_height: u64::try_from(&IntValue(&arr[2]))?,
+                    block_time: u64::try_from(&IntValue(&arr[3]))?,
+                    stale_time: u64::try_from(&IntValue(&arr[4]))?,
+                    expire_time: u64::try_from(&IntValue(&arr[5]))?,
+                    threshold: u8::try_from(&IntValue(&arr[6]))?,
+                    key_kind: u8::try_from(&IntValue(&arr[7]))?,
+                    public_keys: Bytes32::vec_try_from_value(&arr[8])?,
+                    ..Default::default()
+                };
+                if arr.len() == 10 {
+                    state.next_public_keys = Some(Bytes32::vec_try_from_value(&arr[9])?);
+                }
+                Ok(state)
+            }
+            _ => Err(Error::Custom(format!(
+                "NameState: expected array of length 9 or 10, got {}",
+                arr.len()
+            ))),
+        }
+    }
 }
 
 impl NameState {
@@ -34,7 +100,7 @@ impl NameState {
         }
     }
 
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
+    pub fn hash(&self) -> Result<Bytes32, Error> {
         hash_sha3(self)
     }
 
@@ -143,7 +209,7 @@ impl NameState {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct ServiceState {
     pub name: String,
     pub code: u64,
@@ -151,8 +217,74 @@ pub struct ServiceState {
     pub data: Vec<(u16, Value)>,
 }
 
+impl From<&ServiceState> for Value {
+    fn from(state: &ServiceState) -> Self {
+        Value::Array(vec![
+            Value::from(state.name.clone()),
+            Value::from(state.code),
+            Value::from(state.sequence),
+            Value::Map(
+                state
+                    .data
+                    .iter()
+                    .map(|(subcode, params)| (Value::from(*subcode), params.clone()))
+                    .collect(),
+            ),
+        ])
+    }
+}
+
+impl TryFrom<&Value> for ServiceState {
+    type Error = Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let arr = value.as_array().ok_or_else(|| {
+            Error::Custom(format!(
+                "ServiceState: expected array, got {}",
+                kind_of_value(value)
+            ))
+        })?;
+        match arr.len() {
+            4 => {
+                let state = ServiceState {
+                    name: arr[0]
+                        .as_text()
+                        .ok_or_else(|| {
+                            Error::Custom(format!(
+                                "ServiceState: expected string, got {}",
+                                kind_of_value(&arr[0])
+                            ))
+                        })?
+                        .to_string(),
+                    code: u64::try_from(&IntValue(&arr[1]))?,
+                    sequence: u64::try_from(&IntValue(&arr[2]))?,
+                    data: arr[3]
+                        .as_map()
+                        .ok_or_else(|| {
+                            Error::Custom(format!(
+                                "ServiceState: expected map, got {}",
+                                kind_of_value(&arr[3])
+                            ))
+                        })?
+                        .iter()
+                        .map(|(k, v)| {
+                            let subcode = u16::try_from(&IntValue(k))?;
+                            Ok((subcode, v.clone()))
+                        })
+                        .collect::<Result<Vec<(u16, Value)>, Error>>()?,
+                };
+                Ok(state)
+            }
+            _ => Err(Error::Custom(format!(
+                "ServiceState: expected array of length 4, got {}",
+                arr.len()
+            ))),
+        }
+    }
+}
+
 impl ServiceState {
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
+    pub fn hash(&self) -> Result<Bytes32, Error> {
         hash_sha3(self)
     }
 
@@ -199,7 +331,7 @@ impl ServiceState {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ServiceProtocol {
     pub code: u64,
     pub version: u16,
@@ -220,8 +352,57 @@ impl Default for ServiceProtocol {
     }
 }
 
+impl From<&ServiceProtocol> for Value {
+    fn from(state: &ServiceProtocol) -> Self {
+        Value::Array(vec![
+            Value::from(state.code),
+            Value::from(state.version),
+            state.protocol.clone(),
+            Value::from(state.submitter.clone()),
+            Value::from(state.sequence),
+        ])
+    }
+}
+
+impl TryFrom<&Value> for ServiceProtocol {
+    type Error = Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let arr = value.as_array().ok_or_else(|| {
+            Error::Custom(format!(
+                "ServiceProtocol: expected array, got {}",
+                kind_of_value(value)
+            ))
+        })?;
+        match arr.len() {
+            5 => {
+                let state = ServiceProtocol {
+                    code: u64::try_from(&IntValue(&arr[0]))?,
+                    version: u16::try_from(&IntValue(&arr[1]))?,
+                    protocol: arr[2].clone(),
+                    submitter: arr[3]
+                        .as_text()
+                        .ok_or_else(|| {
+                            Error::Custom(format!(
+                                "ServiceProtocol: expected string, got {}",
+                                kind_of_value(&arr[0])
+                            ))
+                        })?
+                        .to_string(),
+                    sequence: u64::try_from(&IntValue(&arr[4]))?,
+                };
+                Ok(state)
+            }
+            _ => Err(Error::Custom(format!(
+                "ServiceProtocol: expected array of length 4, got {}",
+                arr.len()
+            ))),
+        }
+    }
+}
+
 impl ServiceProtocol {
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
+    pub fn hash(&self) -> Result<Bytes32, Error> {
         hash_sha3(self)
     }
 
@@ -244,26 +425,126 @@ impl ServiceProtocol {
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct Inscription {
     pub name: String,
     pub sequence: u64,
     pub height: u64,
     pub name_height: u64,
-    pub previous_hash: Vec<u8>,
-    pub name_hash: Vec<u8>,
-    pub service_hash: Vec<u8>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub protocol_hash: Option<Vec<u8>>,
-    pub block_hash: Vec<u8>,
+    pub previous_hash: Bytes32,
+    pub name_hash: Bytes32,
+    pub service_hash: Bytes32,
+    pub protocol_hash: Option<Bytes32>,
     pub block_height: u64,
-    pub txid: Vec<u8>,
+    pub block_hash: Bytes32,
+    pub txid: Bytes32,
     pub vin: u8,
     pub data: Name,
 }
 
+impl From<&Inscription> for Value {
+    fn from(state: &Inscription) -> Self {
+        let mut arr = vec![
+            Value::from(state.name.clone()),
+            Value::from(state.sequence),
+            Value::from(state.height),
+            Value::Array(vec![
+                Value::from(state.name_height),
+                Value::from(&state.previous_hash),
+                Value::from(&state.name_hash),
+                Value::from(&state.service_hash),
+            ]),
+            Value::Array(vec![
+                Value::from(state.block_height),
+                Value::from(&state.block_hash),
+                Value::from(&state.txid),
+                Value::from(state.vin),
+            ]),
+            Value::from(&state.data),
+        ];
+        if let Some(ref hash) = state.protocol_hash {
+            arr[3].as_array_mut().unwrap().push(Value::from(hash));
+        }
+        Value::Array(arr)
+    }
+}
+
+impl TryFrom<&Value> for Inscription {
+    type Error = Error;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let arr = value.as_array().ok_or_else(|| {
+            Error::Custom(format!(
+                "Inscription: expected array, got {}",
+                kind_of_value(value)
+            ))
+        })?;
+        match arr.len() {
+            6 => {
+                let ins_state = arr[3].as_array().ok_or_else(|| {
+                    Error::Custom(format!(
+                        "Inscription: expected array at 3, got {}",
+                        kind_of_value(&arr[3])
+                    ))
+                })?;
+                if ins_state.len() != 4 && ins_state.len() != 5 {
+                    return Err(Error::Custom(format!(
+                        "Inscription: expected array of length 4 or 5 at 3, got {}",
+                        ins_state.len()
+                    )));
+                }
+                let tx_state = arr[4].as_array().ok_or_else(|| {
+                    Error::Custom(format!(
+                        "Inscription: expected array at 4, got {}",
+                        kind_of_value(&arr[3])
+                    ))
+                })?;
+                if tx_state.len() != 4 {
+                    return Err(Error::Custom(format!(
+                        "Inscription: expected array of length 4 at 4, got {}",
+                        tx_state.len()
+                    )));
+                }
+
+                let mut ins = Inscription {
+                    name: arr[0]
+                        .as_text()
+                        .ok_or_else(|| {
+                            Error::Custom(format!(
+                                "Inscription: expected string, got {}",
+                                kind_of_value(&arr[0])
+                            ))
+                        })?
+                        .to_string(),
+                    sequence: u64::try_from(&IntValue(&arr[1]))?,
+                    height: u64::try_from(&IntValue(&arr[2]))?,
+                    name_height: u64::try_from(&IntValue(&ins_state[0]))?,
+                    previous_hash: Bytes32::try_from(&ins_state[1])?,
+                    name_hash: Bytes32::try_from(&ins_state[2])?,
+                    service_hash: Bytes32::try_from(&ins_state[3])?,
+                    protocol_hash: None,
+                    block_height: u64::try_from(&IntValue(&tx_state[0]))?,
+                    block_hash: Bytes32::try_from(&tx_state[1])?,
+                    txid: Bytes32::try_from(&tx_state[2])?,
+                    vin: u8::try_from(&IntValue(&tx_state[3]))?,
+                    data: Name::try_from(&arr[5])?,
+                };
+                if ins_state.len() == 5 {
+                    ins.protocol_hash = Some(Bytes32::try_from(&ins_state[4])?);
+                }
+
+                Ok(ins)
+            }
+            _ => Err(Error::Custom(format!(
+                "Inscription: expected array of length 4, got {}",
+                arr.len()
+            ))),
+        }
+    }
+}
+
 impl Inscription {
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
+    pub fn hash(&self) -> Result<Bytes32, Error> {
         hash_sha3(self)
     }
 }
@@ -272,14 +553,86 @@ impl Inscription {
 pub struct InvalidInscription {
     pub name: String,
     pub block_height: u64,
-    pub hash: Vec<u8>,
+    pub hash: Bytes32,
     pub reason: String,
     pub data: Name,
 }
 
-impl InvalidInscription {
-    pub fn hash(&self) -> Result<Vec<u8>, Error> {
-        hash_sha3(self)
+impl InvalidInscription {}
+
+impl Serialize for NameState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Value::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for NameState {
+    fn deserialize<D>(deserializer: D) -> Result<NameState, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        NameState::try_from(&val).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for ServiceState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Value::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ServiceState {
+    fn deserialize<D>(deserializer: D) -> Result<ServiceState, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        ServiceState::try_from(&val).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for ServiceProtocol {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Value::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for ServiceProtocol {
+    fn deserialize<D>(deserializer: D) -> Result<ServiceProtocol, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        ServiceProtocol::try_from(&val).map_err(de::Error::custom)
+    }
+}
+
+impl Serialize for Inscription {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        Value::from(self).serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Inscription {
+    fn deserialize<D>(deserializer: D) -> Result<Inscription, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        let val = Value::deserialize(deserializer)?;
+        Inscription::try_from(&val).map_err(de::Error::custom)
     }
 }
 
@@ -297,11 +650,11 @@ pub fn to_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
     Ok(buf)
 }
 
-pub fn hash_sha3<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
+pub fn hash_sha3<T: Serialize>(value: &T) -> Result<Bytes32, Error> {
     let mut hasher = Sha3_256::new();
     into_writer(value, hasher.borrow_mut())
         .map_err(|err| Error::Custom(format!("hash_sha3: {:?}", err)))?;
-    Ok(hasher.finalize().to_vec())
+    Bytes32::try_from(hasher.finalize().as_slice())
 }
 
 #[cfg(test)]
@@ -329,7 +682,7 @@ mod tests {
             block_height: 1,
             block_time: 1,
             threshold: 1,
-            public_keys: vec![s1.verifying_key().to_bytes().to_vec()],
+            public_keys: vec![s1.verifying_key().to_bytes().into()],
             ..Default::default()
         };
 
@@ -342,8 +695,8 @@ mod tests {
                     subcode: 1,
                     params: ns::Value::from(&ns::PublicKeyParams {
                         public_keys: vec![
-                            s1.verifying_key().to_bytes().to_vec(),
-                            s2.verifying_key().to_bytes().to_vec(),
+                            s1.verifying_key().to_bytes().into(),
+                            s2.verifying_key().to_bytes().into(),
                         ],
                         threshold: None,
                         kind: None,
@@ -376,8 +729,8 @@ mod tests {
                     subcode: 2,
                     params: ns::Value::from(&ns::PublicKeyParams {
                         public_keys: vec![
-                            s1.verifying_key().to_bytes().to_vec(),
-                            s2.verifying_key().to_bytes().to_vec(),
+                            s1.verifying_key().to_bytes().into(),
+                            s2.verifying_key().to_bytes().into(),
                         ],
                         threshold: None,
                         kind: None,
@@ -405,13 +758,13 @@ mod tests {
         assert_eq!(1, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
-            vec![s1.verifying_key().to_bytes().to_vec()],
+            vec![Bytes32::from(s1.verifying_key().to_bytes())],
             name_state.public_keys
         );
         assert_eq!(
             Some(vec![
-                s1.verifying_key().to_bytes().to_vec(),
-                s2.verifying_key().to_bytes().to_vec()
+                s1.verifying_key().to_bytes().into(),
+                s2.verifying_key().to_bytes().into()
             ]),
             name_state.next_public_keys
         );
@@ -425,8 +778,8 @@ mod tests {
                     subcode: 1,
                     params: ns::Value::from(&ns::PublicKeyParams {
                         public_keys: vec![
-                            s1.verifying_key().to_bytes().to_vec(),
-                            s2.verifying_key().to_bytes().to_vec(),
+                            s1.verifying_key().to_bytes().into(),
+                            s2.verifying_key().to_bytes().into(),
                         ],
                         threshold: None,
                         kind: None,
@@ -454,8 +807,8 @@ mod tests {
             .sign(
                 &ns::PublicKeyParams {
                     public_keys: vec![
-                        s1.verifying_key().to_bytes().to_vec(),
-                        s2.verifying_key().to_bytes().to_vec(),
+                        s1.verifying_key().to_bytes().into(),
+                        s2.verifying_key().to_bytes().into(),
                     ],
                     threshold: None,
                     kind: None,
@@ -476,8 +829,8 @@ mod tests {
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
             vec![
-                s1.verifying_key().to_bytes().to_vec(),
-                s2.verifying_key().to_bytes().to_vec()
+                Bytes32::from(s1.verifying_key().to_bytes()),
+                Bytes32::from(s2.verifying_key().to_bytes()),
             ],
             name_state.public_keys
         );
@@ -493,7 +846,7 @@ mod tests {
                     ns::Operation {
                         subcode: 2,
                         params: ns::Value::from(&ns::PublicKeyParams {
-                            public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                            public_keys: vec![s3.verifying_key().to_bytes().into()],
                             threshold: None,
                             kind: None,
                         }),
@@ -501,7 +854,7 @@ mod tests {
                     ns::Operation {
                         subcode: 1,
                         params: ns::Value::from(&ns::PublicKeyParams {
-                            public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                            public_keys: vec![s3.verifying_key().to_bytes().into()],
                             threshold: None,
                             kind: None,
                         }),
@@ -536,7 +889,7 @@ mod tests {
         assert_eq!(1, name_state.threshold);
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
-            vec![s3.verifying_key().to_bytes().to_vec()],
+            vec![Bytes32::from(s3.verifying_key().to_bytes())],
             name_state.public_keys
         );
         assert_eq!(None, name_state.next_public_keys);
@@ -551,8 +904,8 @@ mod tests {
                     subcode: 1,
                     params: ns::Value::from(&ns::PublicKeyParams {
                         public_keys: vec![
-                            s2.verifying_key().to_bytes().to_vec(),
-                            s1.verifying_key().to_bytes().to_vec(),
+                            s2.verifying_key().to_bytes().into(),
+                            s1.verifying_key().to_bytes().into(),
                         ],
                         threshold: Some(1),
                         kind: None,
@@ -580,8 +933,8 @@ mod tests {
         assert_eq!(0, name_state.key_kind);
         assert_eq!(
             vec![
-                s2.verifying_key().to_bytes().to_vec(),
-                s1.verifying_key().to_bytes().to_vec()
+                Bytes32::from(s2.verifying_key().to_bytes()),
+                Bytes32::from(s1.verifying_key().to_bytes())
             ],
             name_state.public_keys
         );
@@ -597,7 +950,7 @@ mod tests {
                     // this operation will be overwritten
                     subcode: 2,
                     params: ns::Value::from(&ns::PublicKeyParams {
-                        public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                        public_keys: vec![s3.verifying_key().to_bytes().into()],
                         threshold: None,
                         kind: None,
                     }),
@@ -649,8 +1002,8 @@ mod tests {
         assert_eq!(1, name_state.threshold);
         assert_eq!(
             vec![
-                s2.verifying_key().to_bytes().to_vec(),
-                s1.verifying_key().to_bytes().to_vec()
+                Bytes32::from(s2.verifying_key().to_bytes()),
+                Bytes32::from(s1.verifying_key().to_bytes())
             ],
             name_state.public_keys
         );
@@ -666,7 +1019,7 @@ mod tests {
                     // this operation will be overwritten
                     subcode: 2,
                     params: ns::Value::from(&ns::PublicKeyParams {
-                        public_keys: vec![s3.verifying_key().to_bytes().to_vec()],
+                        public_keys: vec![s3.verifying_key().to_bytes().into()],
                         threshold: None,
                         kind: None,
                     }),
@@ -718,12 +1071,16 @@ mod tests {
         assert_eq!(1, name_state.threshold);
         assert_eq!(
             vec![
-                s2.verifying_key().to_bytes().to_vec(),
-                s1.verifying_key().to_bytes().to_vec()
+                Bytes32::from(s2.verifying_key().to_bytes()),
+                Bytes32::from(s1.verifying_key().to_bytes())
             ],
             name_state.public_keys
         );
         assert_eq!(None, name_state.next_public_keys);
+
+        let mut data: Vec<u8> = Vec::new();
+        into_writer(&name_state, &mut data).unwrap();
+        println!("name_state: {:?}", hex::encode(&data));
     }
 
     #[test]
