@@ -27,7 +27,7 @@ pub struct Name {
 pub struct Service {
     pub code: u64,
     pub operations: Vec<Operation>,
-    pub approver: Option<String>, // approver's name
+    pub attesters: Option<Vec<String>>, // attester's name
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -443,12 +443,17 @@ impl Name {
             )));
         }
 
-        if let Some(approver) = &self.service.approver {
-            if !valid_name(approver) {
-                return Err(Error::Custom(format!(
-                    "Name: invalid approver {}",
-                    approver
-                )));
+        if let Some(attesters) = &self.service.attesters {
+            if attesters.is_empty() {
+                return Err(Error::Custom("Name: empty attesters".to_string()));
+            }
+            for attester in attesters {
+                if !valid_name(attester) {
+                    return Err(Error::Custom(format!(
+                        "Name: invalid attester {}",
+                        attester
+                    )));
+                }
             }
         }
 
@@ -596,8 +601,10 @@ impl From<&Service> for Value {
             service.code.into(),
             Value::Array(service.operations.iter().map(Value::from).collect()),
         ];
-        if let Some(ref approver) = service.approver {
-            arr.push(Value::Text(approver.clone()));
+        if let Some(attesters) = &service.attesters {
+            arr.push(Value::Array(
+                attesters.clone().into_iter().map(Value::from).collect(),
+            ));
         }
         Value::Array(arr)
     }
@@ -691,16 +698,33 @@ impl TryFrom<&Value> for Service {
                         .iter()
                         .map(Operation::try_from)
                         .collect::<Result<Vec<Operation>, Self::Error>>()?,
-                    approver: None,
+                    attesters: None,
                 };
                 if v == 3 {
-                    let approver = arr[2].as_text().ok_or_else(|| {
+                    let attesters = arr[2].as_array().ok_or_else(|| {
                         Error::Custom(format!(
-                            "Service: expected text, got {}",
+                            "Service: expected array, got {}",
                             kind_of_value(&arr[2])
                         ))
                     })?;
-                    srv.approver = Some(approver.to_string());
+                    if attesters.is_empty() {
+                        return Err(Error::Custom(
+                            "Service: expected non-empty array of attesters".to_string(),
+                        ));
+                    }
+
+                    let attesters: Result<Vec<String>, Error> = attesters
+                        .iter()
+                        .map(|v| {
+                            v.as_text().map(String::from).ok_or_else(|| {
+                                Error::Custom(format!(
+                                    "Name: expected text, got {}",
+                                    kind_of_value(&arr[0])
+                                ))
+                            })
+                        })
+                        .collect();
+                    srv.attesters = Some(attesters?);
                 }
                 Ok(srv)
             }
@@ -992,7 +1016,7 @@ mod tests {
                     subcode: 1,
                     params: Value::from(&params),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1054,7 +1078,7 @@ mod tests {
                     subcode: 1,
                     params: Value::from(&params),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };

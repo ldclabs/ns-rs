@@ -102,7 +102,7 @@ impl Client {
                         sleep(Duration::from_secs(retry_secs)).await;
                         continue;
                     } else {
-                        anyhow::bail!("Client: {}", err.to_string());
+                        anyhow::bail!("request({}): {}", url, err.to_string());
                     }
                 }
             }
@@ -111,7 +111,8 @@ impl Client {
         let data = res.bytes().await?;
         let output: Response<T> = from_reader(&data[..]).map_err(|err| {
             anyhow::anyhow!(
-                "Client: failed to parse response, {}, data: {}",
+                "request({}): failed to parse response, {}, data: {}",
+                url,
                 err.to_string(),
                 String::from_utf8_lossy(&data)
             )

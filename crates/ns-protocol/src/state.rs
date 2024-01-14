@@ -702,7 +702,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -736,7 +736,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -785,7 +785,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -860,7 +860,7 @@ mod tests {
                         }),
                     },
                 ],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -911,7 +911,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -955,7 +955,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -982,7 +982,7 @@ mod tests {
                     subcode: 0,
                     params: ns::Value::Null,
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1024,7 +1024,7 @@ mod tests {
                         kind: None,
                     }),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1051,7 +1051,7 @@ mod tests {
                     subcode: 0,
                     params: ns::Value::Null,
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1100,7 +1100,7 @@ mod tests {
                     subcode: 0,
                     params: ns::Value::Null,
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1120,7 +1120,7 @@ mod tests {
                     subcode: 0,
                     params: ns::Value::Text("hello".to_string()),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1143,7 +1143,7 @@ mod tests {
                     subcode: 3,
                     params: ns::Value::Null,
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -1168,7 +1168,7 @@ mod tests {
                     subcode: 2,
                     params: ns::Value::Text("hello2".to_string()),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };

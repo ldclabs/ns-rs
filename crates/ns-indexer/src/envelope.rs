@@ -108,7 +108,7 @@ mod tests {
                     subcode: 1,
                     params: Value::from(&params),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
@@ -126,7 +126,7 @@ mod tests {
                     subcode: 1,
                     params: Value::from(&params),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };

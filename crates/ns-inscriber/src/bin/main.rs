@@ -523,7 +523,7 @@ async fn main() -> anyhow::Result<()> {
                             subcode: 1,
                             params: Value::from(&params),
                         }],
-                        approver: None,
+                        attesters: None,
                     },
                     signatures: vec![],
                 };
@@ -600,7 +600,7 @@ async fn main() -> anyhow::Result<()> {
                             subcode: 1,
                             params: Value::from(&params),
                         }],
-                        approver: None,
+                        attesters: None,
                     },
                     signatures: vec![],
                 };

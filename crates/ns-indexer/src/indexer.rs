@@ -289,20 +289,22 @@ impl Indexer {
         };
         service_protocol.validate(&name.service)?;
 
-        if let Some(ref approver) = name.service.approver {
-            let mut approver_state = db::NameState::with_pk(approver.clone());
-            approver_state
-                .get_one(&self.scylla, vec![])
-                .await
-                .map_err(|err| {
-                    anyhow::anyhow!(
-                        "failed to get approver state, name: {}, err: {}",
-                        approver,
-                        err
-                    )
-                })?;
-            let approver_state = approver_state.to_index()?;
-            name.verify(&approver_state.public_key_params(), ThresholdLevel::Default)?;
+        if let Some(attesters) = &name.service.attesters {
+            for attester in attesters {
+                let mut attester_state = db::NameState::with_pk(attester.clone());
+                attester_state
+                    .get_one(&self.scylla, vec![])
+                    .await
+                    .map_err(|err| {
+                        anyhow::anyhow!(
+                            "failed to get attester state, name: {}, err: {}",
+                            attester,
+                            err
+                        )
+                    })?;
+                let attester_state = attester_state.to_index()?;
+                name.verify(&attester_state.public_key_params(), ThresholdLevel::Default)?;
+            }
         }
 
         // pre-check state cache in read lock

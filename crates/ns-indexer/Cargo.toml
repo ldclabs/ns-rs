@@ -1,6 +1,6 @@
 [package]
 name = "ns-indexer"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 rust-version = "1.64"
 description = "Name & Service Protocol indexer service in Rust"
@@ -15,7 +15,7 @@ name = "ns-indexer"
 path = "src/bin/main.rs"
 
 [dependencies]
-ns-protocol = { path = "../ns-protocol", version = "0.7" }
+ns-protocol = { path = "../ns-protocol", version = "0.8" }
 ns-axum-web = { path = "../ns-axum-web", version = "0.1" }
 ns-scylla-orm = { path = "../ns-scylla-orm", version = "0.1" }
 ns-scylla-orm-macros = { path = "../ns-scylla-orm-macros", version = "0.1" }

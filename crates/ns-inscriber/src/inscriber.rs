@@ -386,7 +386,7 @@ impl Inscriber {
         Ok(txid)
     }
 
-    // return (to_spent_tx_out, unsigned_commit_tx, signed_reveal_tx)
+    // return (unsigned_commit_tx, signed_reveal_tx)
     pub async fn build_inscription_transactions(
         &self,
         names: &Vec<Name>,
@@ -738,7 +738,7 @@ mod tests {
                     subcode: 1,
                     params: Value::from(&params),
                 }],
-                approver: None,
+                attesters: None,
             },
             signatures: vec![],
         };
