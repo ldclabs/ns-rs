@@ -1,5 +1,5 @@
 use bitcoin::Network;
-// use bip32::{DerivationPath, XPrv};
+use coset::{iana, CoseKey, KeyType, Label, RegisteredLabelWithPrivate};
 use rand_core::OsRng;
 
 pub use bitcoin::{
@@ -12,6 +12,10 @@ pub use bitcoin::{
     sign_message::{signed_msg_hash, MessageSignature},
     ScriptBuf,
 };
+
+use ns_protocol::ns::Value;
+
+use super::KeyHelper;
 
 pub fn derive_secp256k1<C>(
     secp: &Secp256k1<C>,
@@ -76,4 +80,34 @@ where
         anyhow::bail!("invalid signature");
     }
     Ok(())
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Secp256k1Key(pub CoseKey);
+
+impl Secp256k1Key {
+    pub fn from_secret(secret: &[u8; 32], kid: Option<Value>) -> anyhow::Result<Self> {
+        let mut key = CoseKey {
+            kty: KeyType::Assigned(iana::KeyType::EC2),
+            alg: Some(RegisteredLabelWithPrivate::Assigned(
+                iana::Algorithm::ES256K,
+            )),
+            params: vec![
+                (
+                    Label::Int(iana::Ec2KeyParameter::Crv as i64),
+                    Value::from(iana::EllipticCurve::Secp256k1 as i64),
+                ),
+                (
+                    Label::Int(iana::Ec2KeyParameter::D as i64),
+                    Value::Bytes(secret.to_vec()),
+                ),
+            ],
+            ..Default::default()
+        };
+
+        if let Some(kid) = kid {
+            key.set_kid(kid)?;
+        }
+        Ok(Self(key))
+    }
 }

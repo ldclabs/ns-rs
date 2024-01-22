@@ -2,27 +2,31 @@ use anyhow::anyhow;
 use bitcoin::{address::NetworkChecked, Address, Amount, Network, PublicKey, ScriptBuf, Txid};
 use chrono::{Local, SecondsFormat};
 use clap::{Parser, Subcommand};
-use ns_protocol::ns::valid_name;
 use std::{
     path::{Path, PathBuf},
     str::FromStr,
 };
 // use sys_locale::get_locale;
-use coset::{CoseEncrypt0, TaggedCborSerializable};
+use coset::{CborSerializable, CoseEncrypt0, CoseKey, Label, TaggedCborSerializable};
 use terminal_prompt::Terminal;
 
 use ns_inscriber::{
     bitcoin::BitCoinRPCOptions,
     inscriber::{Inscriber, InscriberOptions, UnspentTxOut, UnspentTxOutJSON},
     wallet::{
-        base64_decode, base64_encode, base64url_decode, base64url_encode, ed25519, hash_256, iana,
-        secp256k1, unwrap_cbor_tag, wrap_cbor_tag, DerivationPath, Encrypt0, Key,
+        base64_decode, base64url_decode, base64url_encode, decode_sign1,
+        ed25519::{self, Ed25519Key},
+        encode_sign1, hash_256, iana, new_sym, secp256k1, skip_tag, with_tag, DerivationPath,
+        Encrypt0, KeyHelper, CBOR_TAG,
     },
 };
-use ns_protocol::ns::{Bytes32, Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value};
+use ns_protocol::ns::{
+    valid_name, Bytes32, Name, Operation, PublicKeyParams, Service, ThresholdLevel, Value,
+};
 
-const AAD: &[u8; 12] = b"ns-inscriber";
-const TRANSFER_KEY_AAD: &[u8; 20] = b"ns:transfer.cose.key";
+const INS_AAD: &[u8; 12] = b"ns-inscriber";
+const NS_TRANS_KEY_AAD: &[u8; 20] = b"NS:COSE/Transfer.Key";
+const NS_SIGN_MESSAGE_AAD: &[u8; 19] = b"NS:COSE/Sign.Mesage";
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -80,7 +84,10 @@ pub enum Commands {
         idx: u32,
     },
     /// List keys in keys dir.
-    ListKeys {},
+    ListKeys {
+        #[arg(short, long, default_value_t = false)]
+        detail: bool,
+    },
     /// Display secp256k1 addresses
     Secp256k1Address {
         /// secp256k key file name, will be combined to "{key}.cose.key" to read secp256k key
@@ -106,7 +113,7 @@ pub enum Commands {
         #[arg(long)]
         msg: String,
         /// signature to verify
-        #[arg(long)]
+        #[arg(long, default_value = "")]
         sig: String,
         /// signature encoding format, default is base64, can be "hex"
         #[arg(long, default_value = "base64")]
@@ -190,14 +197,15 @@ async fn main() -> anyhow::Result<()> {
             let password = terminal.prompt_sensitive("Enter a password to protect KEK: ")?;
             let mkek = hash_256(password.as_bytes());
             let kid = if alias.is_empty() {
-                Local::now().to_rfc3339_opts(SecondsFormat::Secs, true)
+                Value::Text(Local::now().to_rfc3339_opts(SecondsFormat::Secs, true))
             } else {
-                alias.to_owned()
+                Value::Text(alias.to_owned())
             };
-            let encryptor = Encrypt0::new(mkek);
-            let kek = Key::new_sym(iana::Algorithm::A256GCM, kid.as_bytes())?;
-            let data = encryptor.encrypt(&kek.to_vec()?, AAD, kid.as_bytes())?;
-            let data = wrap_cbor_tag(&data);
+            let kid = Some(kid);
+            let encryptor = Encrypt0::new(mkek, None);
+            let kek = new_sym(iana::Algorithm::A256GCM, kid.clone())?;
+            let data = encryptor.encrypt(&kek.to_slice()?, INS_AAD, kid)?;
+            let data = with_tag(&CBOR_TAG, &data);
             println!(
                 "Put this new KEK as INSCRIBER_KEK on config file:\n{}",
                 base64url_encode(&data)
@@ -213,26 +221,26 @@ async fn main() -> anyhow::Result<()> {
             }
 
             let kek = KekEncryptor::open()?;
-            let signing_key = ed25519::new_ed25519();
-            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
-            let key = Key::ed25519_from_secret(signing_key.as_bytes(), address.as_bytes())?;
-            let key_id = key.key_id();
-            kek.save_key(&file, key)?;
+            let mut key = ed25519::Ed25519Key::new(None)?;
+            let pk = key.get_public()?;
+            let kid = Value::Bytes(pk.to_vec());
+            key.0.set_kid(kid.clone())?;
+            kek.save_key(&file, key.0, Some(Value::Bytes(pk.to_vec())))?;
             println!(
-                "New seed key: {}, key id: {}",
+                "New seed key: {}, key id: {:?}",
                 file.display(),
-                String::from_utf8_lossy(&key_id)
+                hex::encode(pk)
             );
             return Ok(());
         }
 
         Some(Commands::ImportSeed { alias }) => {
-            let kid = if alias.is_empty() {
+            let alias = if alias.is_empty() {
                 Local::now().to_rfc3339_opts(SecondsFormat::Secs, true) + ".seed"
             } else {
                 alias.to_owned()
             };
-            let file = keys_path.join(format!("{kid}.cose.key"));
+            let file = keys_path.join(format!("{alias}.cose.key"));
             if KekEncryptor::key_exists(&file) {
                 println!("{} exists, skipping key generation", file.display());
                 return Ok(());
@@ -245,20 +253,16 @@ async fn main() -> anyhow::Result<()> {
                 let password =
                     terminal.prompt_sensitive("Enter the password that protected the seed: ")?;
                 let kek = hash_256(password.as_bytes());
-                let decryptor = Encrypt0::new(kek);
+                let decryptor = Encrypt0::new(kek, None);
                 let ciphertext = base64url_decode(import_key.trim())?;
-                let key = decryptor.decrypt(unwrap_cbor_tag(&ciphertext), TRANSFER_KEY_AAD)?;
-                Key::from_slice(&key)?
+                let key = decryptor.decrypt(skip_tag(&CBOR_TAG, &ciphertext), NS_TRANS_KEY_AAD)?;
+                Ed25519Key::from_slice(&key)?
             };
 
             let kek = KekEncryptor::open()?;
-            let key_id = key.key_id();
-            kek.save_key(&file, key)?;
-            println!(
-                "Imported seed key: {}, key id: {}",
-                file.display(),
-                String::from_utf8_lossy(&key_id)
-            );
+            let kid = key.0.kid();
+            kek.save_key(&file, key.0, kid.clone())?;
+            println!("Imported seed key: {}, key id: {:?}", file.display(), kid);
             return Ok(());
         }
 
@@ -267,13 +271,13 @@ async fn main() -> anyhow::Result<()> {
                 let kek = KekEncryptor::open()?;
                 kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?
             };
-            let key_id = key.key_id();
+            let key = Ed25519Key(key);
+            let kid = key.0.kid();
             let mut terminal = Terminal::open()?;
             let password = terminal.prompt_sensitive("Enter a password to protect the seed: ")?;
             let kek = hash_256(password.as_bytes());
-            let encryptor = Encrypt0::new(kek);
-            let data = encryptor.encrypt(&key.to_vec()?, TRANSFER_KEY_AAD, &key_id)?;
-            let data = wrap_cbor_tag(&data);
+            let encryptor = Encrypt0::new(kek, None);
+            let data = encryptor.encrypt(&key.to_slice()?, NS_TRANS_KEY_AAD, kid)?;
             let data = base64url_encode(&data);
 
             println!("The exported seed key (base64url encoded):\n\n{data}\n\n");
@@ -283,11 +287,12 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Secp256k1Derive { seed, acc, idx }) => {
             let kek = KekEncryptor::open()?;
             let seed_key = kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?;
+            let seed_key = Ed25519Key(seed_key);
             let kid = format!("m/44'/0'/{acc}'/1/{idx}");
             let path: DerivationPath = kid.parse()?;
             let secp = secp256k1::Secp256k1::new();
             let keypair =
-                secp256k1::derive_secp256k1(&secp, network, &seed_key.secret_key()?, &path)?;
+                secp256k1::derive_secp256k1(&secp, network, &seed_key.get_secret()?, &path)?;
             let address = Address::p2wpkh(
                 &PublicKey {
                     compressed: true,
@@ -295,9 +300,11 @@ async fn main() -> anyhow::Result<()> {
                 },
                 network,
             )?;
-            let key = Key::secp256k1_from_keypair(&keypair, kid.as_bytes())?;
+            let kid = Some(Value::Text(kid));
+            let key =
+                secp256k1::Secp256k1Key::from_secret(keypair.secret_key().as_ref(), kid.clone())?;
             let file = keys_path.join(format!("{}.cose.key", address));
-            kek.save_key(&file, key)?;
+            kek.save_key(&file, key.0, kid)?;
             println!("key: {}, address: {}", file.display(), address);
             return Ok(());
         }
@@ -305,33 +312,55 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Ed25519Derive { seed, acc, idx }) => {
             let kek = KekEncryptor::open()?;
             let seed_key = kek.read_key(&keys_path.join(format!("{seed}.cose.key")))?;
+            let seed_key = Ed25519Key(seed_key);
             let kid = format!("m/42'/0'/{acc}'/1/{idx}");
             let path: DerivationPath = kid.parse()?;
-            let signing_key = ed25519::derive_ed25519(&seed_key.secret_key()?, &path);
-            let address = format!("0x{}", hex::encode(signing_key.verifying_key().to_bytes()));
-            let key = Key::ed25519_from_secret(signing_key.as_bytes(), kid.as_bytes())?;
+            let signing_key = ed25519::derive_ed25519(&seed_key.get_secret()?, &path);
+            let pk = signing_key.verifying_key().to_bytes();
+            let address = format!("0x{}", hex::encode(pk));
+            let kid = Value::Text(kid);
+            let key = Ed25519Key::from_secret(signing_key.as_bytes(), Some(kid.clone()))?;
             let file = keys_path.join(format!("{}.cose.key", address));
-            kek.save_key(&file, key)?;
+            kek.save_key(&file, key.0, Some(kid))?;
             println!("key: {}, public key: {}", file.display(), address);
             return Ok(());
         }
 
-        Some(Commands::ListKeys {}) => {
+        Some(Commands::ListKeys { detail }) => {
+            let kek = if *detail {
+                Some(KekEncryptor::open()?)
+            } else {
+                None
+            };
             for entry in std::fs::read_dir(keys_path)? {
                 let path = entry?.path();
                 if path.is_file() {
-                    let data = std::fs::read(&path)?;
                     let filename = &path
                         .file_name()
                         .expect("should get file name")
                         .to_string_lossy();
-                    let data = unwrap_cbor_tag(&data);
-                    let e0 = CoseEncrypt0::from_tagged_slice(data).map_err(anyhow::Error::msg)?;
-                    let key_id = String::from_utf8_lossy(&e0.unprotected.key_id);
-                    if key_id.starts_with("m/") {
-                        println!("\nkey file: {}\nkey derived path: {}", filename, key_id);
-                    } else {
-                        println!("\nkey file: {}\nkey id: {}", filename, key_id);
+                    println!("\nkey file: {}", filename);
+
+                    match kek {
+                        Some(ref kek) => {
+                            let key = kek.read_key(&path)?;
+                            println!("key id: {}", key.kid_string());
+                        }
+                        None => {
+                            let data = std::fs::read(&path)?;
+                            let data = skip_tag(&CBOR_TAG, &data);
+                            let e0 = CoseEncrypt0::from_tagged_slice(data)
+                                .map_err(anyhow::Error::msg)?;
+                            let cid = e0
+                                .unprotected
+                                .rest
+                                .iter()
+                                .find(|&v| v.0 == Label::Text("cid".to_string()))
+                                .map(|v| &v.1);
+                            if let Some(cid) = cid {
+                                println!("key id: {:?}", cid);
+                            }
+                        }
                     }
                 }
             }
@@ -347,7 +376,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let secp = secp256k1::Secp256k1::new();
             let keypair =
-                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.get_secret()?)?;
             let (public_key, _parity) = keypair.x_only_public_key();
             let script_pubkey = ScriptBuf::new_p2tr(&secp, public_key, None);
             let address: Address<NetworkChecked> =
@@ -382,21 +411,26 @@ async fn main() -> anyhow::Result<()> {
             if cose_key.is_crv(iana::EllipticCurve::Secp256k1) {
                 let secp = secp256k1::Secp256k1::new();
                 let keypair =
-                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.secret_key()?)?;
+                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.get_secret()?)?;
 
                 let sig = secp256k1::sign_message(&secp, &keypair.secret_key(), msg);
                 if enc == "hex" {
                     println!("signature:\n{}", hex::encode(sig.serialize()));
                 } else {
-                    println!("signature:\n{}", base64_encode(&sig.serialize()));
+                    println!("signature:\n{}", base64url_encode(&sig.serialize()));
                 }
             } else if cose_key.is_crv(iana::EllipticCurve::Ed25519) {
-                let signing_key = ed25519::SigningKey::from_bytes(&cose_key.secret_key()?);
-                let sig = ed25519::sign_message(&signing_key, msg);
+                let key = ed25519::Ed25519Key(cose_key);
+                let signer = key.signer()?;
+                let output = encode_sign1(
+                    signer,
+                    msg.as_bytes().to_vec(),
+                    NS_SIGN_MESSAGE_AAD.as_slice(),
+                )?;
                 if enc == "hex" {
-                    println!("signature:\n{}", hex::encode(sig.to_bytes()));
+                    println!("signed message:\n{}", hex::encode(&output));
                 } else {
-                    println!("signature:\n{}", base64_encode(&sig.to_bytes()));
+                    println!("signed message:\n{}", base64url_encode(&output));
                 }
             } else {
                 println!("unsupported key type");
@@ -407,23 +441,28 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::VerifyMessage { key, msg, sig, enc }) => {
             let kek = KekEncryptor::open()?;
             let cose_key = kek.read_key(&keys_path.join(format!("{key}.cose.key")))?;
-            let sig = if enc == "hex" {
-                hex::decode(sig)?
-            } else {
-                base64_decode(sig)?
-            };
-            if cose_key.is_crv(iana::EllipticCurve::Secp256k1) {
-                let secp = secp256k1::Secp256k1::new();
 
+            if cose_key.is_crv(iana::EllipticCurve::Secp256k1) {
+                let sig = if enc == "hex" {
+                    hex::decode(sig)?
+                } else {
+                    base64_decode(sig)?
+                };
+                let secp = secp256k1::Secp256k1::new();
                 let keypair =
-                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.secret_key()?)?;
+                    secp256k1::Keypair::from_seckey_slice(&secp, &cose_key.get_secret()?)?;
                 secp256k1::verify_message(&secp, &keypair.public_key(), msg, &sig)?;
 
                 println!("signature is valid");
             } else if cose_key.is_crv(iana::EllipticCurve::Ed25519) {
-                let signing_key = ed25519::SigningKey::from_bytes(&cose_key.secret_key()?);
-                ed25519::verify_message(&signing_key.verifying_key(), msg, &sig)?;
-
+                let msg = if enc == "hex" {
+                    hex::decode(msg)?
+                } else {
+                    base64_decode(msg)?
+                };
+                let key = ed25519::Ed25519Key(cose_key);
+                let verifier = key.verifier()?;
+                decode_sign1(verifier, &msg, NS_SIGN_MESSAGE_AAD.as_slice())?;
                 println!("signature is valid");
             } else {
                 println!("unsupported key type");
@@ -452,7 +491,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let secp = secp256k1::Secp256k1::new();
             let keypair =
-                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.get_secret()?)?;
             let (p2wpkh_pubkey, p2tr_pubkey) = secp256k1::as_script_pubkey(&secp, &keypair);
 
             let inscriber = get_inscriber(network).await?;
@@ -504,7 +543,7 @@ async fn main() -> anyhow::Result<()> {
             if !ed25519_key.is_crv(iana::EllipticCurve::Ed25519) {
                 anyhow::bail!("{} is not a ed25519 key", key);
             }
-            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
+            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.get_secret()?);
             let params = PublicKeyParams {
                 public_keys: vec![Bytes32(signing_key.verifying_key().to_bytes().to_owned())],
                 threshold: None,
@@ -581,7 +620,7 @@ async fn main() -> anyhow::Result<()> {
             if !ed25519_key.is_crv(iana::EllipticCurve::Ed25519) {
                 anyhow::bail!("{} is not a ed25519 key", key);
             }
-            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.secret_key()?);
+            let signing_key = ed25519::SigningKey::from_bytes(&ed25519_key.get_secret()?);
             let params = PublicKeyParams {
                 public_keys: vec![Bytes32(signing_key.verifying_key().to_bytes().to_owned())],
                 threshold: None,
@@ -615,7 +654,7 @@ async fn main() -> anyhow::Result<()> {
             }
             let secp = secp256k1::Secp256k1::new();
             let keypair =
-                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.secret_key()?)?;
+                secp256k1::Keypair::from_seckey_slice(&secp, &secp256k1_key.get_secret()?)?;
             let (p2wpkh_pubkey, p2tr_pubkey) = secp256k1::as_script_pubkey(&secp, &keypair);
 
             let inscriber = get_inscriber(network).await?;
@@ -672,12 +711,12 @@ impl KekEncryptor {
         let mut terminal = Terminal::open()?;
         let password = terminal.prompt_sensitive("Enter the password protected KEK: ")?;
         let mkek = hash_256(password.as_bytes());
-        let decryptor = Encrypt0::new(mkek);
+        let decryptor = Encrypt0::new(mkek, None);
         let ciphertext = base64url_decode(kek_str.trim())?;
-        let key = decryptor.decrypt(unwrap_cbor_tag(&ciphertext), AAD)?;
-        let key = Key::from_slice(&key)?;
+        let key = decryptor.decrypt(skip_tag(&CBOR_TAG, &ciphertext), INS_AAD)?;
+        let key = CoseKey::from_slice(&key).map_err(anyhow::Error::msg)?;
         Ok(KekEncryptor {
-            encryptor: Encrypt0::new(key.secret_key()?),
+            encryptor: Encrypt0::new(key.get_secret()?, key.kid()),
         })
     }
 
@@ -685,18 +724,18 @@ impl KekEncryptor {
         std::fs::read(file).is_ok()
     }
 
-    fn read_key(&self, file: &Path) -> anyhow::Result<Key> {
+    fn read_key(&self, file: &Path) -> anyhow::Result<CoseKey> {
         let data = std::fs::read(file)?;
-        let key = self.encryptor.decrypt(unwrap_cbor_tag(&data), AAD)?;
-        Key::from_slice(&key)
+        let key = self
+            .encryptor
+            .decrypt(skip_tag(&CBOR_TAG, &data), INS_AAD)?;
+        CoseKey::from_slice(&key).map_err(anyhow::Error::msg)
     }
 
-    fn save_key(&self, file: &Path, key: Key) -> anyhow::Result<()> {
-        let kid = key.key_id();
-        let data = self
-            .encryptor
-            .encrypt(key.to_vec()?.as_slice(), AAD, &kid)?;
-        std::fs::write(file, wrap_cbor_tag(&data))?;
+    fn save_key(&self, file: &Path, key: CoseKey, cid: Option<Value>) -> anyhow::Result<()> {
+        let data = key.to_vec().map_err(anyhow::Error::msg)?;
+        let data = self.encryptor.encrypt(&data, INS_AAD, cid)?;
+        std::fs::write(file, with_tag(&CBOR_TAG, &data))?;
         Ok(())
     }
 }

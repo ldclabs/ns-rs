@@ -1,4 +1,4 @@
-# NS-RS — Inscribing Name service on Bitcoin network
+# NS-RS — Inscribing naming trusted database on Bitcoin network
 
 Rust implementation of [NS-Protocol](https://github.com/ldclabs/ns-protocol) (Name & Service Protocol) by the LDC Labs
 
